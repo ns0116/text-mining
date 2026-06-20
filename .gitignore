@@ -1,0 +1,14 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# PyInstaller build output
+build/
+dist/
+
+# User local configuration
+text_mining_config.json
+
+# Backup/Trash folders
+_attic/
