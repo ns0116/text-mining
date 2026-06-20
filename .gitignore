@@ -12,3 +12,6 @@ text_mining_config.json
 
 # Backup/Trash folders
 _attic/
+
+# macOS system files
+.DS_Store
