@@ -17,12 +17,14 @@ def test_load_sentiment_dict_success():
 
 def test_load_sentiment_dict_file_missing():
     # Test load_sentiment_dict when dictionary file does not exist
+    load_sentiment_dict.clear()
     with patch('os.path.exists', return_value=False):
         sent_dict = load_sentiment_dict()
         assert sent_dict == {}
 
 def test_load_sentiment_dict_read_csv_exception():
     # Test load_sentiment_dict when pd.read_csv raises an exception
+    load_sentiment_dict.clear()
     with patch('os.path.exists', return_value=True), \
          patch('pandas.read_csv', side_effect=Exception("Read error")):
         sent_dict = load_sentiment_dict()

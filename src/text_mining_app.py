@@ -25,7 +25,7 @@ from src.core.config import (
     initialize_session_state,
     save_config
 )
-from src.core.stats import perform_full_analysis
+from src.core.stats import perform_full_analysis, run_nlp_morphology, perform_stats_analysis
 from src.core.visualizer import (
     generate_wordcloud_fig,
     generate_cooc_plotly,
@@ -87,12 +87,56 @@ def handle_file_upload():
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました: {e}")
 
+def parse_synonyms_text(text):
+    syn_dict = {}
+    if not text:
+        return syn_dict
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split(',') if p.strip()]
+        if len(parts) >= 2:
+            target = parts[0]
+            for source in parts[1:]:
+                syn_dict[source] = target
+    return syn_dict
+
+
 # --------------------------------------------------------------------------
 # Streamlit UI構築 (メイン処理)
 # --------------------------------------------------------------------------
 
 def main():
     initialize_session_state()
+
+    # --- インタラクティブ再計算（キャッシュされた生データがある場合） ---
+    if st.session_state.raw_tokens is not None:
+        try:
+            synonyms_dict = parse_synonyms_text(st.session_state.synonyms_text)
+            results = perform_stats_analysis(
+                st.session_state.raw_tokens,
+                st.session_state.raw_sentences,
+                st.session_state.selected_pos,
+                st.session_state.stop_words,
+                synonyms_dict,
+                st.session_state.import_type,
+                st.session_state.attr_col,
+                top_k=st.session_state.top_n
+            )
+            df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = results
+            
+            st.session_state.df_freq = df_freq
+            st.session_state.df_tfidf = df_tfidf if df_tfidf is not None else pd.DataFrame()
+            st.session_state.df_ngrams = df_ngrams
+            st.session_state.df_edges = df_edges
+            st.session_state.df_sentences = df_sentences
+            st.session_state.df_tokens = df_tokens
+            st.session_state.df_ca = df_ca
+            st.session_state.corpus_stats = corpus_stats
+            st.session_state.analysis_complete = True
+        except Exception as e:
+            st.error(f"統計のリアルタイム更新中にエラーが発生しました: {e}")
 
     st.title("🔬 プロフェッショナル・テキストマイニングツール")
     st.markdown("自然言語学的なコーパス分析と、マーケティング用ユーザーインサイト獲得のための高度な分析を実行します。")
@@ -118,11 +162,23 @@ def main():
         )
 
         st.subheader("フォント設定")
-        st.session_state.font_path = st.text_input(
+        font_input = st.text_input(
             "カスタムフォントパス (.ttf / .ttc)", value=st.session_state.font_path,
             placeholder='例: /System/Library/Fonts/Hiragino Sans GB.ttc',
-            on_change=set_analysis_flag_off,
             help="空欄の場合、システムの日本語フォントを自動検索します。"
+        )
+        if font_input:
+            if ".." in font_input or not (font_input.lower().endswith('.ttf') or font_input.lower().endswith('.ttc')):
+                st.error("❌ セキュリティ警告: パストラバーサル（..）や、.ttf / .ttc 以外の拡張子は指定できません。")
+                font_input = ""
+        st.session_state.font_path = font_input
+
+        st.subheader("🔄 類義語（シノニム）統合")
+        st.session_state.synonyms_text = st.text_area(
+            "代表語, 類義語1, 類義語2... (1行に1組)",
+            value=st.session_state.synonyms_text,
+            height=120,
+            help="例: スマートフォン, スマホ, 携帯"
         )
         
         st.header("🚫 除外ワード（ストップワード）")
@@ -222,14 +278,29 @@ def main():
                 progress_bar.progress(percentage, text=text)
 
             try:
-                results = perform_full_analysis(
+                df_raw_tokens, df_raw_sentences = run_nlp_morphology(
                     df_to_analyze, 
                     text_col_to_use, 
                     attr_col_to_use,
+                    progress_callback=streamlit_progress_callback
+                )
+                
+                st.session_state.raw_tokens = df_raw_tokens
+                st.session_state.raw_sentences = df_raw_sentences
+                st.session_state.text_col = text_col_to_use
+                st.session_state.attr_col = attr_col_to_use
+                
+                synonyms_dict = parse_synonyms_text(st.session_state.synonyms_text)
+                
+                results = perform_stats_analysis(
+                    df_raw_tokens,
+                    df_raw_sentences,
                     st.session_state.selected_pos,
                     st.session_state.stop_words,
+                    synonyms_dict,
                     st.session_state.import_type,
-                    progress_callback=streamlit_progress_callback
+                    attr_col_to_use,
+                    top_k=st.session_state.top_n
                 )
                 progress_bar.empty()
                 
@@ -250,7 +321,8 @@ def main():
                     "top_n": st.session_state.top_n,
                     "font_path": st.session_state.font_path,
                     "stop_words": st.session_state.stop_words,
-                    "selected_pos": st.session_state.selected_pos
+                    "selected_pos": st.session_state.selected_pos,
+                    "synonyms_text": st.session_state.synonyms_text
                 })
                 st.toast("すべての解析が成功しました。結果を表示します。")
                 st.rerun()
@@ -270,13 +342,14 @@ def main():
         st.success("📊 解析結果")
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
             "📊 統計 & 単語頻度", 
             "📈 重要度 (TF-IDF)", 
             "🔗 共起ネットワーク", 
             "🧩 N-gram（連語）分析", 
             "🎭 感情分析", 
-            "🗺️ セグメント & 対応分析"
+            "🗺️ セグメント & 対応分析",
+            "🔍 原文ドリルダウン"
         ])
 
         # --- Tab 1: 統計 & 単語頻度 ---
@@ -313,6 +386,8 @@ def main():
                     fig_wc = generate_wordcloud_fig(word_counts, st.session_state.font_path)
                     if fig_wc:
                         st.pyplot(fig_wc)
+                        import matplotlib.pyplot as plt
+                        plt.close(fig_wc)
                 
                 st.subheader("データテーブル")
                 st.download_button("📥 頻度データをCSVで保存", df_display.to_csv(index=False, encoding='utf-8-sig'), f"word_freq_{timestamp}.csv", "text/csv")
@@ -342,6 +417,8 @@ def main():
                     fig_wc_tfidf = generate_wordcloud_fig(tfidf_dict, st.session_state.font_path)
                     if fig_wc_tfidf:
                         st.pyplot(fig_wc_tfidf)
+                        import matplotlib.pyplot as plt
+                        plt.close(fig_wc_tfidf)
                         
                 st.subheader("データテーブル")
                 st.download_button("📥 TF-IDFデータをCSVで保存", df_tfidf_display.to_csv(index=False, encoding='utf-8-sig'), f"tfidf_{timestamp}.csv", "text/csv")
@@ -472,6 +549,11 @@ def main():
             if st.session_state.attr_col is None:
                 st.warning("⚠️ 属性（セグメント）列が指定されていません。\n\n属性別の比較や対応分析を実行するには、インポートステップにおいてCSV/Excel形式のファイルをアップロードし、「属性（セグメント）分類用の列」を指定してください。")
             else:
+                # カテゴリ数チェック
+                unique_attrs = df_sentences['attr_value'].dropna().unique()
+                if len(unique_attrs) == 2:
+                    st.warning("⚠️ 注意: 属性のカテゴリ数が2つの場合（例：男性と女性のみ）、対応分析は数学的に1次元の軸に縮退します。2次元マップ上の第二成分軸（Y軸）はノイズデータであるため、横方向（第一成分軸）のみに着目してください。より信頼性の高い分析には、3つ以上のカテゴリ（例：満足、普通、不満）を持つ属性を使用することをお勧めします。")
+                
                 df_ca = st.session_state.df_ca
                 if df_ca is None or df_ca.empty:
                     st.warning("データの分散が不足しているため、対応分析を構築できませんでした。")
@@ -497,6 +579,47 @@ def main():
                         st.dataframe(ct_table, use_container_width=True)
                     else:
                         st.write("集計用データがありません。")
+
+        # --- Tab 7: 原文ドリルダウン ---
+        with tab7:
+            st.subheader("🔍 原文ドリルダウン (生の声検索)")
+            st.markdown("特定のキーワードが含まれる文を検索し、文脈と属性・感情スコアを確認します。")
+            
+            search_word = st.text_input("検索するキーワードを入力", value="", placeholder="例: フリーズ")
+            if search_word:
+                # Filter sentences containing the search word
+                df_sentences_drill = st.session_state.df_sentences[
+                    st.session_state.df_sentences['text'].str.contains(search_word, case=False, na=False)
+                ].copy()
+                
+                if df_sentences_drill.empty:
+                    st.info(f"「{search_word}」を含む文は見つかりませんでした。")
+                else:
+                    st.write(f"該当件数: {len(df_sentences_drill)} 件")
+                    
+                    # Highlight word using HTML
+                    import re
+                    def highlight_text(txt):
+                        escaped = re.escape(search_word)
+                        try:
+                            pattern = re.compile(f"({escaped})", re.IGNORECASE)
+                            return pattern.sub(r"<mark style='background-color: #ffff00; color: black; padding: 2px;'>\1</mark>", txt)
+                        except Exception:
+                            return txt
+                            
+                    df_sentences_drill['ハイライトテキスト'] = df_sentences_drill['text'].apply(highlight_text)
+                    
+                    # Select and rename columns
+                    df_show = df_sentences_drill[['ハイライトテキスト', 'attr_value', 'class', 'score']].rename(columns={
+                        'ハイライトテキスト': 'テキスト',
+                        'attr_value': '属性',
+                        'class': '感情分類',
+                        'score': '感情スコア'
+                    })
+                    
+                    st.write(df_show.to_html(escape=False, index=False), unsafe_allow_html=True)
+            else:
+                st.info("キーワードを入力すると、該当する文がここに表示されます。")
 
     elif 'initialized' in st.session_state and not st.session_state.analysis_complete:
         st.info("データを入力し、「解析実行」ボタンを押して分析を開始してください。")

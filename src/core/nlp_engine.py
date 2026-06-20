@@ -16,6 +16,7 @@ def load_ginza_model():
         except OSError as e:
             raise RuntimeError("GiNZAモデルが見つかりません。") from e
 
+@st.cache_data
 def load_sentiment_dict():
     """ローカルの感情極性辞書をロードする"""
     dict_path = resource_path('assets/sentiment_dict.csv')
@@ -23,8 +24,9 @@ def load_sentiment_dict():
     if os.path.exists(dict_path):
         try:
             df_sent = pd.read_csv(dict_path, encoding='utf-8')
-            for _, row in df_sent.iterrows():
-                sent_dict[str(row['word'])] = str(row['polarity'])
+            df_sent = df_sent.dropna(subset=['word', 'polarity'])
+            sent_dict = dict(zip(df_sent['word'].astype(str), df_sent['polarity'].astype(str)))
         except Exception as e:
             print(f"感情極性辞書の読み込みに失敗しました: {e}")
     return sent_dict
+

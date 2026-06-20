@@ -3,7 +3,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from unittest.mock import patch, MagicMock
-from src.core.stats import perform_correspondence_analysis, perform_full_analysis
+from src.core.stats import perform_correspondence_analysis, perform_full_analysis, perform_stats_analysis
 
 # --- Helper Classes for Mocking spaCy ---
 class MockToken:
@@ -209,9 +209,7 @@ def test_perform_full_analysis_mocked():
     # s4 words: 犬, 美しい
     # Bigrams: 犬 - 美しい
     ngram_list = df_ngrams['連語'].tolist()
-    assert '吾輩 - 可愛い' in ngram_list
-    assert '吾輩 - 可愛い - 猫' in ngram_list
-    assert '名前 - 無い' in ngram_list
+    assert '可愛い - 猫' in ngram_list
     
     # 6. Verify Jaccard co-occurrence edge calculations
     # Let's check co-occurrences of words:
@@ -286,3 +284,46 @@ def test_perform_full_analysis_real():
     # Verify corpus stats properties
     assert corpus_stats['総文数'] == 4
     assert corpus_stats['総単語数 (前処理前)'] > 0
+
+def test_negation_sentiment():
+    # Test that negation in tokens flips sentiment polarity correctly
+    # e.g., token "良い" with negation "ない" should resolve to negative "n"
+    df_raw_tokens = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '良い', 'pos': 'ADJ', 'sentiment': 'p', 'is_negated': True},
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '美味い', 'pos': 'ADJ', 'sentiment': 'p', 'is_negated': False},
+        {'doc_id': 0, 'sentence_id': 's2', 'word': '悪い', 'pos': 'ADJ', 'sentiment': 'n', 'is_negated': True},
+    ])
+    df_raw_sentences = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'text': '良くない、美味い', 'attr_value': 'A'},
+        {'doc_id': 0, 'sentence_id': 's2', 'text': '悪くない', 'attr_value': 'A'},
+    ])
+    
+    df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = perform_stats_analysis(
+        df_raw_tokens, df_raw_sentences, ['ADJ'], [], {}, 'CSV / Excel ファイル', 'attr_value'
+    )
+    
+    # "良い" is negated, so it should resolve to 'n' (negative).
+    # "美味い" is not negated, so it resolves to 'p' (positive).
+    # "悪い" is negated, so it resolves to 'p' (positive).
+    sent_dict = dict(zip(df_tokens['word'], df_tokens['resolved_sentiment']))
+    assert sent_dict['良い'] == 'n'
+    assert sent_dict['美味い'] == 'p'
+    assert sent_dict['悪い'] == 'p'
+
+def test_ngram_correctness_pre_filtering():
+    # Test that N-grams are computed on adjacent tokens before POS filter, but only kept if words are in selected_pos.
+    df_raw_tokens = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '猫', 'pos': 'NOUN', 'sentiment': None, 'is_negated': False, 'word_lower': '猫'},
+        {'doc_id': 0, 'sentence_id': 's1', 'word': 'は', 'pos': 'ADP', 'sentiment': None, 'is_negated': False, 'word_lower': 'は'},
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '可愛い', 'pos': 'ADJ', 'sentiment': 'p', 'is_negated': False, 'word_lower': '可愛い'},
+    ])
+    df_raw_sentences = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'text': '猫は可愛い', 'attr_value': 'A'},
+    ])
+    
+    df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = perform_stats_analysis(
+        df_raw_tokens, df_raw_sentences, ['NOUN', 'ADJ'], [], {}, 'CSV / Excel ファイル', 'attr_value'
+    )
+    # df_ngrams should be empty because "猫" and "可愛い" are not adjacent in raw tokens!
+    assert df_ngrams.empty
+

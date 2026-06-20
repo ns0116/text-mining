@@ -68,6 +68,10 @@ def initialize_session_state():
     st.session_state.top_n = config.get("top_n", 10)
     st.session_state.font_path = config.get("font_path", "")
     st.session_state.selected_pos = config.get("selected_pos", ['NOUN', 'PROPN', 'VERB', 'ADJ'])
+    st.session_state.synonyms_text = config.get("synonyms_text", "")
+    
+    st.session_state.raw_tokens = None
+    st.session_state.raw_sentences = None
     
     st.session_state.input_text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。"
     st.session_state.import_type = "直接入力 / テキストファイル"
@@ -91,7 +95,8 @@ def initialize_session_state():
             "top_n": st.session_state.top_n,
             "font_path": st.session_state.font_path,
             "stop_words": st.session_state.stop_words,
-            "selected_pos": st.session_state.selected_pos
+            "selected_pos": st.session_state.selected_pos,
+            "synonyms_text": st.session_state.synonyms_text
         })
     
     st.session_state.initialized = True
