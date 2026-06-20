@@ -1,607 +1,39 @@
 # ファイル名: text_mining_app.py
 # 説明: 自然言語学者およびプロのマーケター向けに高度化したテキストマイニングアプリケーション。
 #       CSV/Excelインポート、属性別セグメント分析、共起ネットワーク、感情分析、N-gram、対応分析を搭載。
-# Version: v2.0 (プロフェッショナル版)
+# Version: v2.0 (プロフェッショナル版) - リファクタリング済
 
-import streamlit as st
-import spacy
-from collections import Counter
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
-from sklearn.feature_extraction.text import TfidfVectorizer
-import numpy as np
-import json
-import os
-import datetime
-import io
-import time
 import sys
-import networkx as nx
-import scipy.linalg
+import os
+import streamlit as st
+import pandas as pd
+import datetime
+import plotly.express as px
 
-# --------------------------------------------------------------------------
-# 1. PyInstaller対応ヘルパー関数 & 初期設定
-# --------------------------------------------------------------------------
+# プロジェクトルートディレクトリを python path に追加する
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-def resource_path(relative_path):
-    """ 実行ファイル内のリソースへのパスを取得する """
-    if hasattr(sys, '_MEIPASS'):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-def get_application_path():
-    """ 実行ファイルの場所、またはスクリプトの場所を取得する """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# --- 定数 ---
-CONFIG_FILE = os.path.join(get_application_path(), "text_mining_config.json")
-DEFAULT_STOP_WORDS = ['こと', 'もの', 'よう', 'ため', 'これ', 'それ', 'あれ', 'さん', 'する', 'いる', 'なる', 'ある', 'ない', 'いう', '思う', 'できる', 'とき', 'ところ']
-MAX_CHARS_PER_CHUNK = 10000
-
-# 詳細な品詞定義
-POS_MAP_JAPANESE = {
-    '名詞 (一般)': 'NOUN',
-    '固有名詞': 'PROPN',
-    '代名詞': 'PRON',
-    '動詞': 'VERB',
-    '形容詞': 'ADJ',
-    '副詞': 'ADV',
-    '接続詞': 'CONJ',
-    '助動詞': 'AUX',
-    '助詞': 'ADP'
-}
-POS_MAP_JAPANESE_REV = {v: k for k, v in POS_MAP_JAPANESE.items()}
-
-# --- Streamlit ページ設定 ---
+# Streamlit ページ設定は最初に実行する必要がある
 st.set_page_config(layout="wide", page_title="プロフェッショナル・テキストマイニングツール")
 
-# --------------------------------------------------------------------------
-# 2. ユーティリティ関数 & 設定管理
-# --------------------------------------------------------------------------
-
-def load_config():
-    """設定ファイルを読み込む"""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            st.warning(f"設定ファイルの読み込みに失敗しました: {e}")
-    return {}
-
-def save_config(config_data):
-    """設定ファイルを保存する"""
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, indent=2, ensure_ascii=False)
-    except IOError as e:
-        st.error(f"設定ファイルの保存に失敗しました: {e}")
-
-def initialize_session_state():
-    """セッションステートを初期化する"""
-    if 'initialized' in st.session_state:
-        return
-
-    config = load_config()
-    st.session_state.stop_words = config.get("stop_words", DEFAULT_STOP_WORDS)
-    st.session_state.top_n = config.get("top_n", 10)
-    st.session_state.font_path = config.get("font_path", "")
-    st.session_state.selected_pos = config.get("selected_pos", ['NOUN', 'PROPN', 'VERB', 'ADJ'])
-    
-    st.session_state.input_text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。"
-    st.session_state.import_type = "直接入力 / テキストファイル"
-    st.session_state.df_uploaded = None
-    st.session_state.text_col = ""
-    st.session_state.attr_col = None
-    
-    st.session_state.analysis_complete = False
-    st.session_state.df_freq = pd.DataFrame()
-    st.session_state.df_tfidf = pd.DataFrame()
-    st.session_state.df_ngrams = pd.DataFrame()
-    st.session_state.df_edges = pd.DataFrame()
-    st.session_state.df_sentences = pd.DataFrame()
-    st.session_state.df_tokens = pd.DataFrame()
-    st.session_state.df_ca = None
-    st.session_state.corpus_stats = {}
-
-    # 初回起動時に設定ファイルがなければ作成
-    if not os.path.exists(CONFIG_FILE):
-        save_config({
-            "top_n": st.session_state.top_n,
-            "font_path": st.session_state.font_path,
-            "stop_words": st.session_state.stop_words,
-            "selected_pos": st.session_state.selected_pos
-        })
-    
-    st.session_state.initialized = True
-
-def load_sentiment_dict():
-    """ローカルの感情極性辞書をロードする"""
-    # assets 内のパスを解決
-    dict_path = resource_path('assets/sentiment_dict.csv')
-    sent_dict = {}
-    if os.path.exists(dict_path):
-        try:
-            df_sent = pd.read_csv(dict_path, encoding='utf-8')
-            for _, row in df_sent.iterrows():
-                sent_dict[str(row['word'])] = str(row['polarity'])
-        except Exception as e:
-            st.warning(f"感情極性辞書の読み込みに失敗しました: {e}")
-    return sent_dict
+# コアモジュールのインポート
+from src.core.config import (
+    POS_MAP_JAPANESE,
+    POS_MAP_JAPANESE_REV,
+    initialize_session_state,
+    save_config
+)
+from src.core.stats import perform_full_analysis
+from src.core.visualizer import (
+    generate_wordcloud_fig,
+    generate_cooc_plotly,
+    generate_ca_plotly
+)
 
 # --------------------------------------------------------------------------
-# 3. 解析エンジン・コア機能
-# --------------------------------------------------------------------------
-
-@st.cache_resource
-def load_ginza_model():
-    """GiNZAモデルをキャッシュして読み込む"""
-    try:
-        model_path = resource_path('ja_ginza')
-        return spacy.load(model_path)
-    except OSError:
-        try:
-            return spacy.load('ja_ginza')
-        except OSError:
-            st.error("GiNZAモデルが見つかりません。")
-            st.stop()
-
-nlp = load_ginza_model()
-
-def perform_correspondence_analysis(df_tokens, df_sentences, attr_col, top_k=50):
-    """SVDを用いて対応分析を計算する"""
-    try:
-        # トークンに属性値を結合
-        df_token_attr = pd.merge(df_tokens, df_sentences[['sentence_id', 'attr_value']], on='sentence_id', how='left')
-        
-        # 頻出トップKの単語を抽出
-        top_words = df_token_attr.groupby('word').size().sort_values(ascending=False).head(top_k).index.tolist()
-        df_filtered = df_token_attr[df_token_attr['word'].isin(top_words)]
-        
-        if df_filtered.empty:
-            return None
-            
-        # クロス集計表 (単語 × 属性)
-        ct = pd.crosstab(df_filtered['word'], df_filtered['attr_value'])
-        
-        if ct.shape[0] < 2 or ct.shape[1] < 2:
-            return None
-            
-        X = ct.values.astype(float)
-        N = X.sum()
-        if N == 0:
-            return None
-            
-        P = X / N
-        
-        row_sums = P.sum(axis=1)
-        col_sums = P.sum(axis=0)
-        
-        # 0割りの防止
-        row_sums[row_sums == 0] = 1e-10
-        col_sums[col_sums == 0] = 1e-10
-        
-        Dr_inv_sqrt = np.diag(1.0 / np.sqrt(row_sums))
-        Dc_inv_sqrt = np.diag(1.0 / np.sqrt(col_sums))
-        
-        # 標準化残差
-        rc = np.outer(row_sums, col_sums)
-        S = Dr_inv_sqrt @ (P - rc) @ Dc_inv_sqrt
-        
-        # 特異値分解
-        U, s, Vt = scipy.linalg.svd(S, full_matrices=False)
-        
-        if len(s) < 2:
-            return None
-            
-        # 2次元座標の算出
-        R = Dr_inv_sqrt @ U[:, :2] @ np.diag(s[:2])
-        C = Dc_inv_sqrt @ Vt[:2, :].T @ np.diag(s[:2])
-        
-        df_rows = pd.DataFrame({
-            'name': ct.index,
-            'x': R[:, 0],
-            'y': R[:, 1],
-            'type': '単語'
-        })
-        
-        df_cols = pd.DataFrame({
-            'name': ct.columns,
-            'x': C[:, 0],
-            'y': C[:, 1],
-            'type': '属性'
-        })
-        
-        df_ca = pd.concat([df_rows, df_cols], ignore_index=True)
-        return df_ca
-    except Exception as e:
-        st.warning(f"対応分析の実行中にエラーが発生しました: {e}")
-        return None
-
-def perform_full_analysis(df, text_col, attr_col, selected_pos, stop_words, import_type):
-    """形態素解析、統計、頻度、TF-IDF、共起、感情、対応分析をまとめて計算する"""
-    progress_bar = st.progress(0, text="解析の準備中...")
-    
-    sentiment_dict = load_sentiment_dict()
-    
-    all_sentences = []
-    all_tokens = []
-    
-    raw_token_count = 0
-    raw_unique_lemmas = set()
-    
-    total_rows = len(df)
-    
-    for row_idx, row in df.iterrows():
-        text = str(row[text_col]) if pd.notna(row[text_col]) else ""
-        attr_val = str(row[attr_col]) if attr_col and pd.notna(row[attr_col]) else "未設定"
-        
-        # 文区切り (。 または 改行)
-        sentences = [s.strip() for s in text.replace('\r\n', '\n').replace('\r', '\n').split('。') if s.strip()]
-        if not sentences:
-            sentences = [text.strip()] if text.strip() else []
-            
-        for sent_idx, sent in enumerate(sentences):
-            doc = nlp(sent)
-            sent_tokens = []
-            pos_count = 0
-            neg_count = 0
-            
-            for token in doc:
-                # 前処理前の基礎統計計算用
-                if not token.is_punct and not token.is_space and len(token.lemma_.strip()) > 0:
-                    raw_token_count += 1
-                    raw_unique_lemmas.add(token.lemma_)
-                    
-                    pos_tag = token.pos_
-                    if pos_tag in ['CCONJ', 'SCONJ']:
-                        pos_tag = 'CONJ'
-                    
-                    # 感情判定
-                    word_lemma = token.lemma_
-                    sentiment = sentiment_dict.get(word_lemma, None)
-                    if sentiment == 'p':
-                        pos_count += 1
-                    elif sentiment == 'n':
-                        neg_count += 1
-                        
-                    # ユーザー指定の品詞フィルタ & ストップワード
-                    if pos_tag in selected_pos and word_lemma not in stop_words:
-                        sent_tokens.append({
-                            'word': word_lemma,
-                            'pos': pos_tag,
-                            'sentiment': sentiment
-                        })
-            
-            # 文単位の感情スコア計算
-            denom = pos_count + neg_count
-            sent_score = (pos_count - neg_count) / denom if denom > 0 else 0.0
-            if sent_score > 0.05:
-                sent_class = 'ポジティブ'
-            elif sent_score < -0.05:
-                sent_class = 'ネガティブ'
-            else:
-                sent_class = 'ニュートラル'
-                
-            sentence_id = f"{row_idx}_{sent_idx}"
-            all_sentences.append({
-                'doc_id': row_idx,
-                'sentence_id': sentence_id,
-                'text': sent,
-                'pos_count': pos_count,
-                'neg_count': neg_count,
-                'score': sent_score,
-                'class': sent_class,
-                'attr_value': attr_val
-            })
-            
-            for t in sent_tokens:
-                all_tokens.append({
-                    'doc_id': row_idx,
-                    'sentence_id': sentence_id,
-                    'word': t['word'],
-                    'pos': t['pos'],
-                    'sentiment': t['sentiment']
-                })
-                
-        progress_percentage = int((row_idx + 1) / total_rows * 70)
-        progress_bar.progress(progress_percentage, text=f"形態素解析中... ({row_idx + 1}/{total_rows}行完了)")
-        
-    if not all_tokens:
-        progress_bar.empty()
-        st.warning("解析対象の単語が見つかりませんでした。テキストまたは除外設定を見直してください。")
-        return None, None, None, None, None, None, None, None
-        
-    df_tokens = pd.DataFrame(all_tokens)
-    df_sentences = pd.DataFrame(all_sentences)
-    
-    # 1. 頻度集計
-    progress_bar.progress(75, text="単語頻度の集計中...")
-    df_freq = df_tokens.groupby(['word', 'pos']).size().reset_index(name='出現回数').sort_values(by='出現回数', ascending=False)
-    # 感情極性を結合
-    pos_info_sent = df_tokens[['word', 'sentiment']].drop_duplicates(subset='word')
-    df_freq = pd.merge(df_freq, pos_info_sent, on='word', how='left')
-    
-    # 2. TF-IDF集計
-    progress_bar.progress(80, text="TF-IDF重要度の計算中...")
-    doc_col = 'doc_id' if import_type == 'CSV / Excel ファイル' else 'sentence_id'
-    doc_groups = df_tokens.groupby(doc_col)
-    docs = [" ".join(group['word'].tolist()) for _, group in doc_groups]
-    
-    df_tfidf = pd.DataFrame()
-    if len(docs) > 1:
-        try:
-            vectorizer = TfidfVectorizer(token_pattern=r'(?u)\b\w+\b')
-            tfidf_matrix = vectorizer.fit_transform(docs)
-            feature_names = vectorizer.get_feature_names_out()
-            avg_tfidf = np.asarray(tfidf_matrix.mean(axis=0)).ravel()
-            df_tfidf = pd.DataFrame({'word': feature_names, '平均重要度スコア': avg_tfidf})
-            
-            pos_info = df_tokens[['word', 'pos', 'sentiment']].drop_duplicates(subset='word')
-            df_tfidf = pd.merge(df_tfidf, pos_info, on='word', how='left').sort_values(by='平均重要度スコア', ascending=False)
-        except Exception as e:
-            st.warning(f"TF-IDFの計算中にエラーが発生しました: {e}")
-            
-    # 3. N-grams (Bigram / Trigram)
-    progress_bar.progress(85, text="N-gram（連語）の抽出中...")
-    bigrams = []
-    trigrams = []
-    for _, group in df_tokens.groupby('sentence_id'):
-        words = group['word'].tolist()
-        for i in range(len(words) - 1):
-            bigrams.append(f"{words[i]} - {words[i+1]}")
-        for i in range(len(words) - 2):
-            trigrams.append(f"{words[i]} - {words[i+1]} - {words[i+2]}")
-            
-    df_bigrams = pd.DataFrame(Counter(bigrams).most_common(), columns=['連語', '出現回数'])
-    df_bigrams['タイプ'] = 'Bigram (2語連語)'
-    df_trigrams = pd.DataFrame(Counter(trigrams).most_common(), columns=['連語', '出現回数'])
-    df_trigrams['タイプ'] = 'Trigram (3語連語)'
-    df_ngrams = pd.concat([df_bigrams, df_trigrams], ignore_index=True)
-    
-    # 4. 共起関係の計算 (Jaccard係数)
-    progress_bar.progress(90, text="共起関係の集計中...")
-    top_words = df_freq.head(100)['word'].tolist()
-    sent_groups = df_tokens.groupby('sentence_id')
-    word_sets = [set(group[group['word'].isin(top_words)]['word']) for _, group in sent_groups]
-    
-    word_df = Counter()
-    pair_df = Counter()
-    for w_set in word_sets:
-        for w in w_set:
-            word_df[w] += 1
-        w_list = list(w_set)
-        for i in range(len(w_list)):
-            for j in range(i + 1, len(w_list)):
-                w1, w2 = sorted([w_list[i], w_list[j]])
-                pair_df[(w1, w2)] += 1
-                
-    edges = []
-    for (w1, w2), cooc_count in pair_df.items():
-        df1 = word_df[w1]
-        df2 = word_df[w2]
-        jaccard = cooc_count / (df1 + df2 - cooc_count)
-        edges.append({
-            'word1': w1,
-            'word2': w2,
-            'cooc': cooc_count,
-            'jaccard': jaccard
-        })
-    df_edges = pd.DataFrame(edges).sort_values(by='jaccard', ascending=False) if edges else pd.DataFrame(columns=['word1', 'word2', 'cooc', 'jaccard'])
-    
-    # 5. 対応分析 (SVD)
-    df_ca = None
-    if attr_col is not None:
-        progress_bar.progress(95, text="対応分析のマップ作成中...")
-        df_ca = perform_correspondence_analysis(df_tokens, df_sentences, attr_col)
-        
-    # コーパス統計
-    ttr = len(raw_unique_lemmas) / raw_token_count if raw_token_count > 0 else 0.0
-    avg_sent_len = raw_token_count / len(all_sentences) if all_sentences else 0.0
-    corpus_stats = {
-        '総文数': len(all_sentences),
-        '総単語数 (前処理前)': raw_token_count,
-        '異なり単語数 (前処理前)': len(raw_unique_lemmas),
-        '語彙多様性指数 (TTR)': ttr,
-        '平均文長 (単語数)': avg_sent_len
-    }
-    
-    progress_bar.progress(100, text="すべての解析が完了しました！")
-    time.sleep(0.5)
-    progress_bar.empty()
-    
-    return df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats
-
-# --------------------------------------------------------------------------
-# 4. 可視化グラフ生成関数
-# --------------------------------------------------------------------------
-
-def generate_wordcloud_fig(frequencies, font_path):
-    """ワードクラウド画像を生成する"""
-    if not frequencies:
-        return None
-    
-    font_path_to_use = None
-    if font_path and os.path.exists(font_path):
-        font_path_to_use = font_path
-    else:
-        try:
-            bundled_font = resource_path('assets/NotoSansJP-Regular.ttf')
-            if os.path.exists(bundled_font):
-                font_path_to_use = bundled_font
-        except Exception:
-            pass
-
-    if not font_path_to_use or not os.path.exists(font_path_to_use):
-        font_paths = [
-            'C:/Windows/Fonts/YuGothM.ttc',
-            'C:/Windows/Fonts/meiryo.ttc',
-            '/System/Library/Fonts/Hiragino Sans GB.ttc',
-            '/System/Library/Fonts/AppleGothic.ttf',
-            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
-        ]
-        for path in font_paths:
-            if os.path.exists(path):
-                font_path_to_use = path
-                break
-        else:
-            st.warning("日本語フォントが見つからないため文字化けする可能性があります。")
-            font_path_to_use = None
-
-    try:
-        wc = WordCloud(font_path=font_path_to_use, 
-                       width=800, height=500, background_color='white', 
-                       max_words=100, collocations=False, max_font_size=80
-                       ).generate_from_frequencies(frequencies)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.imshow(wc, interpolation='bilinear')
-        ax.axis('off')
-        return fig
-    except Exception as e:
-        st.error(f"ワードクラウド生成エラー: {e}")
-        return None
-
-def generate_cooc_plotly(df_edges, df_freq, top_n_edges=40, layout_k=0.4):
-    """Plotlyを用いたインタラクティブな共起ネットワーク"""
-    if df_edges.empty:
-        return None
-        
-    df_subset = df_edges.head(top_n_edges)
-    
-    G = nx.Graph()
-    for _, row in df_subset.iterrows():
-        G.add_edge(row['word1'], row['word2'], weight=row['jaccard'])
-        
-    # 力学モデルでノード配置を計算
-    pos = nx.spring_layout(G, k=layout_k, seed=42)
-    
-    freq_dict = dict(zip(df_freq['word'], df_freq['出現回数']))
-    
-    # エッジ描画用の座標
-    edge_x = []
-    edge_y = []
-    for edge in G.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=1.5, color='rgba(150, 150, 150, 0.4)'),
-        hoverinfo='none',
-        mode='lines'
-    )
-    
-    # ノード描画用の座標
-    node_x = []
-    node_y = []
-    node_text = []
-    node_size = []
-    node_color = []
-    
-    degrees = dict(G.degree())
-    
-    for node in G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_text.append(f"{node} (頻度: {freq_dict.get(node, 1)})")
-        
-        # 頻度に基づくノードサイズ
-        size = 10 + np.sqrt(freq_dict.get(node, 1)) * 4
-        node_size.append(size)
-        node_color.append(degrees[node])
-        
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers+text',
-        hoverinfo='text',
-        text=[n for n in G.nodes()],
-        hovertext=node_text,
-        textposition="top center",
-        marker=dict(
-            showscale=True,
-            colorscale='Viridis',
-            reversescale=True,
-            color=node_color,
-            size=node_size,
-            colorbar=dict(
-                thickness=15,
-                title=dict(text='接続数 (Degree)', side='right'),
-                xanchor='left'
-            ),
-            line=dict(width=1.5, color='black')
-        )
-    )
-    
-    fig = go.Figure(data=[edge_trace, node_trace],
-                 layout=go.Layout(
-                    showlegend=False,
-                    hovermode='closest',
-                    margin=dict(b=0,l=0,r=0,t=40),
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-                 )
-    )
-    return fig
-
-def generate_ca_plotly(df_ca):
-    """対応分析結果の2次元散布図マップ"""
-    if df_ca is None or df_ca.empty:
-        return None
-        
-    fig = go.Figure()
-    
-    # 単語のプロット
-    df_words = df_ca[df_ca['type'] == '単語']
-    fig.add_trace(go.Scatter(
-        x=df_words['x'],
-        y=df_words['y'],
-        mode='markers+text',
-        name='単語',
-        text=df_words['name'],
-        textposition="top center",
-        marker=dict(size=8, color='#1f77b4', opacity=0.7),
-        hovertemplate='単語: %{text}<br>第一成分: %{x:.3f}<br>第二成分: %{y:.3f}<extra></extra>'
-    ))
-    
-    # 属性カテゴリのプロット
-    df_attrs = df_ca[df_ca['type'] == '属性']
-    fig.add_trace(go.Scatter(
-        x=df_attrs['x'],
-        y=df_attrs['y'],
-        mode='markers+text',
-        name='属性カテゴリ',
-        text=df_attrs['name'],
-        textposition="top center",
-        marker=dict(size=14, color='#ff7f0e', symbol='diamond', line=dict(width=2, color='black')),
-        hovertemplate='属性: %{text}<br>第一成分: %{x:.3f}<br>第二成分: %{y:.3f}<extra></extra>'
-    ))
-    
-    # 原点を通る補助線
-    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-    fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
-    
-    fig.update_layout(
-        xaxis_title='第一成分軸',
-        yaxis_title='第二成分軸',
-        hovermode='closest',
-        margin=dict(l=40, r=40, t=50, b=40),
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
-    )
-    
-    return fig
-
-# --------------------------------------------------------------------------
-# 5. UI操作用コールバック関数
+# UI操作用コールバック関数
 # --------------------------------------------------------------------------
 
 def set_analysis_flag_off():
@@ -656,7 +88,7 @@ def handle_file_upload():
             st.error(f"ファイルの読み込み中にエラーが発生しました: {e}")
 
 # --------------------------------------------------------------------------
-# 6. Streamlit UI構築 (メイン処理)
+# Streamlit UI構築 (メイン処理)
 # --------------------------------------------------------------------------
 
 def main():
@@ -783,16 +215,26 @@ def main():
                 st.error("ファイルがアップロードされていません。")
                 
         if df_to_analyze is not None:
-            df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = perform_full_analysis(
-                df_to_analyze, 
-                text_col_to_use, 
-                attr_col_to_use,
-                st.session_state.selected_pos,
-                st.session_state.stop_words,
-                st.session_state.import_type
-            )
+            # 進行バーをStreamlit側で生成し、コールバック経由で更新する
+            progress_bar = st.progress(0, text="解析の準備中...")
             
-            if df_freq is not None:
+            def streamlit_progress_callback(percentage, text):
+                progress_bar.progress(percentage, text=text)
+
+            try:
+                results = perform_full_analysis(
+                    df_to_analyze, 
+                    text_col_to_use, 
+                    attr_col_to_use,
+                    st.session_state.selected_pos,
+                    st.session_state.stop_words,
+                    st.session_state.import_type,
+                    progress_callback=streamlit_progress_callback
+                )
+                progress_bar.empty()
+                
+                df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = results
+                
                 st.session_state.df_freq = df_freq
                 st.session_state.df_tfidf = df_tfidf if df_tfidf is not None else pd.DataFrame()
                 st.session_state.df_ngrams = df_ngrams
@@ -812,6 +254,15 @@ def main():
                 })
                 st.toast("すべての解析が成功しました。結果を表示します。")
                 st.rerun()
+            except ValueError as e:
+                progress_bar.empty()
+                st.warning(str(e))
+            except RuntimeError as e:
+                progress_bar.empty()
+                st.error(str(e))
+            except Exception as e:
+                progress_bar.empty()
+                st.error(f"解析中に想定外のエラーが発生しました: {e}")
 
     # --- 3. 解析結果の表示 ---
     if st.session_state.analysis_complete:
@@ -952,7 +403,7 @@ def main():
         # --- Tab 5: 感情分析 ---
         with tab5:
             st.subheader("🎭 感情分析 (ポジネガ判定)")
-            st.markdown("ローカルの評価極性辞書を用いて、各文または各行のポジティブ度・ネガティブ度を判定します。")
+            st.markdown("ローカルの感情極性辞書を用いて、各文または各行のポジティブ度・ネガティブ度を判定します。")
             
             df_sentences = st.session_state.df_sentences
             df_tokens = st.session_state.df_tokens

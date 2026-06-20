@@ -17,6 +17,7 @@ matplotlib_mpl_data = os.path.join(os.path.dirname(matplotlib.__file__), 'mpl-da
 datas = [
     ('assets/NotoSansJP-Regular.ttf', 'assets'), 
     ('src/text_mining_app.py', '.'), 
+    ('src/core', 'src/core'),
     (streamlit_static, 'streamlit/static'), 
     (ja_ginza_model, 'ja_ginza'), 
     (ginza_dir, 'ginza'), 
