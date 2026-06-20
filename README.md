@@ -9,11 +9,12 @@
 ## 📁 ディレクトリ構成
 
 ```text
-Text_Mining/
+text-mining/
 │  .gitignore                   # Git除外設定
 │  README.md                    # 本説明書
 │  requirements.txt             # 依存ライブラリ一覧
 │  TextMiningApp.spec           # PyInstallerビルド構成ファイル
+│  text_mining_config.json      # アプリ設定ファイル (Git除外)
 │
 ├─assets/                       # リソースフォルダ
 │      NotoSansJP-Regular.ttf   # 日本語フォントファイル
