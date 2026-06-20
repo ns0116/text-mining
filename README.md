@@ -2,7 +2,7 @@
 
 日本語テキストの形態素解析を行い、頻出単語や重要キーワード（TF-IDF）を抽出して、棒グラフやワードクラウドで可視化する Streamlit アプリケーションです。
 
-本プロジェクトは、ソースコードが **`src/`** 、バッチファイルが **`scripts/`** 、データやフォントなどのリソースが **`assets/`** に整理されて設計されています。
+本プロジェクトはプロフェッショナル版 (v2.0) として高度化されており、属性別セグメント分析、共起ネットワーク、感情分析、N-gram、対応分析（Correspondence Analysis）など、自然言語学者やマーケター向けの高度な分析が可能です。
 
 ---
 
@@ -19,19 +19,32 @@ text-mining/
 ├─assets/                       # リソースフォルダ
 │      NotoSansJP-Regular.ttf   # 日本語フォントファイル
 │      sample.txt               # 動作確認用サンプルテキスト
+│      sentiment_dict.csv       # 感情極性辞書（自動ダウンロード）
 │
 ├─src/                          # ソースコードフォルダ
-│      text_mining_app.py       # メインアプリケーションコード
-│      run.py                   # exe起動用エントリーポイント
+│  │  text_mining_app.py       # メインアプリケーションコード (Streamlit UI)
+│  │  run.py                   # exe起動用エントリーポイント
+│  │
+│  └─core/                     # コアロジックモジュール
+│          __init__.py          # パッケージ初期化
+│          config.py            # 設定値・セッション管理
+│          nlp_engine.py        # 自然言語処理・形態素解析エンジン
+│          stats.py             # 統計・データ抽出（TF-IDF, N-gram, 共起, 対応分析等）
+│          visualizer.py        # 可視化処理（WordCloud, 共起ネットワーク等の描画）
 │
-├─scripts/                      # 各種バッチファイルフォルダ
-│      text_mining_app_launch.bat # アプリ通常起動バッチ
-│      build.bat                # exeビルド実行用バッチ
+├─scripts/                      # 各種スクリプトフォルダ
+│      text_mining_app_launch.bat # アプリ通常起動バッチ (Windows用)
+│      text_mining_app_launch.sh  # アプリ起動スクリプト (macOS用)
+│      build.bat                # exeビルド実行用バッチ (Windows用)
 │      create_requirements.bat  # requirements.txt自動更新バッチ
+│      download_sentiment.py    # 感情極性辞書ダウンロードスクリプト
+│
+├─tests/                        # テストコードフォルダ
+│      test_nlp.py              # 自然言語処理エンジンのテスト
+│      test_stats.py            # 統計分析処理のテスト
 │
 ├─.venv/                        # Python仮想環境 (Git除外)
-├─_attic/                       # 過去の古いバックアップ退避フォルダ
-└─dist/                         # ビルドされたexe出力先 (Git除外)
+└─dist/                         # ビルドされた成果物出力先 (Git除外)
 ```
 
 ---
@@ -45,33 +58,73 @@ text-mining/
 pip install -r requirements.txt
 ```
 
-### 2. GiNZAモデルのダウンロード
+### 2. 自然言語処理モデル (GiNZA) のダウンロード
 日本語の形態素解析モデル（GiNZA）をインストールします。
 
 ```bash
 python -m spacy download ja_ginza
 ```
 
-### 3. アプリの起動
-`scripts/` フォルダ内の以下のバッチファイルをダブルクリックして起動します。
-* **`scripts/text_mining_app_launch.bat`**
+### 3. 感情極性辞書のダウンロード
+感情分析機能を利用するため、事前に感情極性辞書（東北大学 乾・関根研究室）をダウンロードして `assets/` 配下に配置します。
+以下のスクリプトを実行することで、自動的にダウンロードと加工・配置が行われます。
 
-※ バッチファイルは内部で自動的に親ディレクトリ（プロジェクトルート）に移動して実行します。
+```bash
+python scripts/download_sentiment.py
+```
+
+### 4. アプリの起動
+
+#### macOS の場合:
+ターミナルで `scripts/` フォルダ内の以下のシェルスクリプトを実行します。自動的に仮想環境の検出、依存関係のチェック、およびアプリの起動が行われます。
+
+```bash
+chmod +x scripts/text_mining_app_launch.sh
+./scripts/text_mining_app_launch.sh
+```
+
+#### Windows の場合:
+`scripts/` フォルダ内の以下のバッチファイルをダブルクリックして起動します。
+
+* **`scripts/text_mining_app_launch.bat`**
 
 起動後、自動的にブラウザが開いて `http://localhost:8501` でアプリが利用可能になります。
 
 ---
 
-## 📦 実行ファイル (exe) のビルド方法
+## 🧪 テストの実行方法
 
-本アプリは、Python環境が入っていない他のPCでも動作するスタンドアロンな `TextMiningApp.exe` にビルドできます。
+コアロジックの動作検証のために `pytest` によるユニットテストを実行できます。
 
-### 1. ビルドの実行
+### 1. pytest のインストール
+```bash
+pip install pytest
+```
+
+### 2. テストの実行
+プロジェクトルートディレクトリで以下を実行します。
+
+```bash
+pytest
+```
+
+---
+
+## 📦 実行ファイル (exe / バイナリ) のビルド方法
+
+本アプリは、Python環境が入っていないPCでも動作するスタンドアロンな実行ファイルにビルドできます。
+
+### Windows の場合:
 `scripts/` フォルダ内の以下のバッチファイルをダブルクリックして実行します。
 * **`scripts/build.bat`**
 
-※ ビルドには spacy やモデルデータのコピーが含まれるため、数分かかる場合があります。
+### macOS の場合:
+ターミナル（仮想環境を有効にした状態）で、プロジェクトルートフォルダから以下を実行します。
 
-### 2. 成果物の確認
-ビルド完了後、**`dist/`** フォルダの中に **`TextMiningApp.exe`** が生成されます。
-このファイルをダブルクリックするだけで、Python環境がない環境でも自動的にブラウザが立ち上がり、アプリを使用できます。
+```bash
+pyinstaller TextMiningApp.spec --clean
+```
+
+### 成果物の確認
+ビルド完了後、**`dist/`** フォルダの中に実行ファイル（Windowsは `TextMiningApp.exe`）が生成されます。このファイルをダブルクリックするだけで、Python環境がないPCでも自動的にブラウザが立ち上がり、アプリを使用できます。
+
