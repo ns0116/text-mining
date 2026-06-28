@@ -243,7 +243,7 @@ def calculate_corpus_stats(df_raw_tokens, df_raw_sentences):
         '平均文長 (単語数)': avg_sent_len
     }
 
-def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, synonyms_dict, import_type, attr_col, top_k=50):
+def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, synonyms_dict, import_type, attr_col, top_k=50, document_resolution="行単位（文単位）", sentiment_threshold=0.05):
     """形態素解析済みのデータに対して、品詞・除外・表記揺れのフィルタリングを適用し、各種統計結果を計算する（超高速処理）"""
     if df_raw_tokens.empty:
         raise ValueError("解析対象の単語が見つかりませんでした。テキストまたは除外設定を見直してください。")
@@ -282,13 +282,19 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
     df_freq = pd.merge(df_freq, pos_info_sent, on='word', how='left')
     
     # 2. TF-IDF集計 (ダミーアナライザーを適用し、再分割を防止)
-    doc_col = 'doc_id' if import_type == 'CSV / Excel ファイル' else 'sentence_id'
-    doc_groups = df_filtered_tokens.groupby(doc_col)
-    docs = [group['word'].tolist() for _, group in doc_groups]
-    
     df_tfidf = pd.DataFrame()
-    if len(docs) > 1:
-        try:
+    try:
+        if document_resolution == "属性グループ単位" and attr_col is not None:
+            # 属性グループ単位での文書化
+            df_token_attr = pd.merge(df_filtered_tokens, df_raw_sentences[['sentence_id', 'attr_value']], on='sentence_id', how='left')
+            doc_groups = df_token_attr.groupby('attr_value')
+            docs = [group['word'].tolist() for _, group in doc_groups]
+        else:
+            doc_col = 'doc_id' if import_type == 'CSV / Excel ファイル' else 'sentence_id'
+            doc_groups = df_filtered_tokens.groupby(doc_col)
+            docs = [group['word'].tolist() for _, group in doc_groups]
+
+        if len(docs) > 1:
             # analyzer=lambda x: x とすることで、リストされたトークンをそのまま処理
             vectorizer = TfidfVectorizer(analyzer=lambda x: x, lowercase=False)
             tfidf_matrix = vectorizer.fit_transform(docs)
@@ -298,8 +304,8 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
             
             pos_info = df_filtered_tokens[['word', 'pos', 'resolved_sentiment']].rename(columns={'resolved_sentiment': 'sentiment'}).drop_duplicates(subset='word')
             df_tfidf = pd.merge(df_tfidf, pos_info, on='word', how='left').sort_values(by='平均重要度スコア', ascending=False)
-        except Exception as e:
-            logger.warning(f"TF-IDFの計算中にエラーが発生しました: {e}")
+    except Exception as e:
+        logger.warning(f"TF-IDFの計算中にエラーが発生しました: {e}")
             
     # 3. N-grams (Bigram / Trigram) (品詞フィルタ「前」の系列から算出、その後構成要素が有効かをチェック)
     bigrams = []
@@ -337,7 +343,7 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
     df_ngrams = pd.concat([df_bigrams, df_trigrams], ignore_index=True)
     
     # 4. 共起関係の計算 (CountVectorizerを用いた高速ベクトル積演算)
-    top_words = df_freq.head(100)['word'].tolist()
+    top_words = df_freq.groupby('word')['出現回数'].sum().sort_values(ascending=False).head(100).index.tolist()
     if len(top_words) < 2:
         df_edges = pd.DataFrame(columns=['word1', 'word2', 'cooc', 'jaccard'])
     else:
@@ -384,7 +390,7 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
         0.0
     )
     sent_sentiment['class'] = np.select(
-        [sent_sentiment['score'] > 0.05, sent_sentiment['score'] < -0.05],
+        [sent_sentiment['score'] > sentiment_threshold, sent_sentiment['score'] < -sentiment_threshold],
         ['ポジティブ', 'ネガティブ'],
         default='ニュートラル'
     )
@@ -405,4 +411,36 @@ def perform_full_analysis(df, text_col, attr_col, selected_pos, stop_words, impo
     """互換性維持のためのラッパー関数"""
     df_raw_tokens, df_raw_sentences = run_nlp_morphology(df, text_col, attr_col, progress_callback)
     return perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, {}, import_type, attr_col)
+
+def export_analysis_to_excel(df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, corpus_stats):
+    """すべての分析結果を個別のシートにまとめたExcelファイルを生成する"""
+    import io
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Sheet 1: コーパス統計情報
+        df_stats = pd.DataFrame(list(corpus_stats.items()), columns=['項目', '数値'])
+        df_stats.to_excel(writer, sheet_name='基本統計', index=False)
+        
+        # Sheet 2: 単語頻度
+        if df_freq is not None and not df_freq.empty:
+            df_freq.to_excel(writer, sheet_name='単語頻度', index=False)
+            
+        # Sheet 3: 重要度 (TF-IDF)
+        if df_tfidf is not None and not df_tfidf.empty:
+            df_tfidf.to_excel(writer, sheet_name='重要度(TF-IDF)', index=False)
+            
+        # Sheet 4: N-grams（連語）
+        if df_ngrams is not None and not df_ngrams.empty:
+            df_ngrams.to_excel(writer, sheet_name='連語分析(N-gram)', index=False)
+            
+        # Sheet 5: 共起関係
+        if df_edges is not None and not df_edges.empty:
+            df_edges.to_excel(writer, sheet_name='共起関係', index=False)
+            
+        # Sheet 6: 原文 & 感情スコア
+        if df_sentences is not None and not df_sentences.empty:
+            df_sentences.to_excel(writer, sheet_name='原文と感情分析', index=False)
+            
+    output.seek(0)
+    return output.getvalue()
 

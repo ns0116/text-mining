@@ -23,9 +23,15 @@ from src.core.config import (
     POS_MAP_JAPANESE,
     POS_MAP_JAPANESE_REV,
     initialize_session_state,
-    save_config
+    save_config,
+    get_system_font_options
 )
-from src.core.stats import perform_full_analysis, run_nlp_morphology, perform_stats_analysis
+from src.core.stats import (
+    perform_full_analysis,
+    run_nlp_morphology,
+    perform_stats_analysis,
+    export_analysis_to_excel
+)
 from src.core.visualizer import (
     generate_wordcloud_fig,
     generate_cooc_plotly,
@@ -110,6 +116,74 @@ def parse_synonyms_text(text):
 def main():
     initialize_session_state()
 
+    # --- CSSのインジェクション ---
+    st.markdown("""
+        <style>
+        /* メインタイトルの装飾 */
+        .main-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #1E3A8A;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+        }
+        
+        /* 統計カードの装飾 */
+        .metric-card {
+            background-color: #F3F4F6;
+            border-radius: 12px;
+            padding: 1.2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            border-left: 5px solid #3B82F6;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            text-align: center;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+        .metric-card-label {
+            font-size: 0.85rem;
+            color: #4B5563;
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+        }
+        .metric-card-val {
+            font-size: 1.6rem;
+            color: #1F2937;
+            font-weight: 700;
+        }
+        
+        /* 全般の微細な調整 */
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 10px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: #F9FAFB;
+            border-radius: 8px 8px 0px 0px;
+            padding: 10px 16px;
+            border: 1px solid #E5E7EB;
+            transition: background-color 0.3s;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            background-color: #F3F4F6;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #3B82F6 !important;
+            color: white !important;
+            font-weight: bold;
+            border-color: #3B82F6 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     # --- インタラクティブ再計算（キャッシュされた生データがある場合） ---
     if st.session_state.raw_tokens is not None:
         try:
@@ -122,7 +196,9 @@ def main():
                 synonyms_dict,
                 st.session_state.import_type,
                 st.session_state.attr_col,
-                top_k=st.session_state.top_n
+                top_k=st.session_state.top_n,
+                document_resolution=st.session_state.document_resolution,
+                sentiment_threshold=st.session_state.sentiment_threshold
             )
             df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = results
             
@@ -145,49 +221,87 @@ def main():
     with st.sidebar:
         st.header("⚙️ 分析対象・フィルタ設定")
         
-        # 品詞選択
-        st.subheader("分析対象とする品詞")
-        selected_pos_jp = st.multiselect(
-            "品詞を選択 (複数可)",
-            options=list(POS_MAP_JAPANESE.keys()),
-            default=[k for k, v in POS_MAP_JAPANESE.items() if v in st.session_state.selected_pos],
-            on_change=set_analysis_flag_off
-        )
-        st.session_state.selected_pos = [POS_MAP_JAPANESE[name] for name in selected_pos_jp]
+        # 1. 品詞・重要度設定
+        with st.expander("品詞・重要度設定", expanded=True):
+            selected_pos_jp = st.multiselect(
+                "品詞を選択 (複数可)",
+                options=list(POS_MAP_JAPANESE.keys()),
+                default=[k for k, v in POS_MAP_JAPANESE.items() if v in st.session_state.selected_pos],
+                on_change=set_analysis_flag_off
+            )
+            st.session_state.selected_pos = [POS_MAP_JAPANESE[name] for name in selected_pos_jp]
 
-        st.subheader("グラフ表示件数")
-        st.session_state.top_n = st.slider(
-            "表示する単語数", min_value=5, max_value=100, 
-            value=st.session_state.top_n, on_change=set_analysis_flag_off
-        )
+            st.session_state.top_n = st.slider(
+                "表示する単語数", min_value=5, max_value=100, 
+                value=st.session_state.top_n, on_change=set_analysis_flag_off
+            )
 
-        st.subheader("フォント設定")
-        font_input = st.text_input(
-            "カスタムフォントパス (.ttf / .ttc)", value=st.session_state.font_path,
-            placeholder='例: /System/Library/Fonts/Hiragino Sans GB.ttc',
-            help="空欄の場合、システムの日本語フォントを自動検索します。"
-        )
-        if font_input:
-            if ".." in font_input or not (font_input.lower().endswith('.ttf') or font_input.lower().endswith('.ttc')):
-                st.error("❌ セキュリティ警告: パストラバーサル（..）や、.ttf / .ttc 以外の拡張子は指定できません。")
-                font_input = ""
-        st.session_state.font_path = font_input
+            st.session_state.document_resolution = st.radio(
+                "TF-IDF 重要度計算の単位",
+                options=["行単位（文単位）", "属性グループ単位"],
+                index=0 if st.session_state.document_resolution == "行単位（文単位）" else 1,
+                on_change=set_analysis_flag_off,
+                help="『属性グループ単位』を選択すると、属性カテゴリごとにテキストをマージして重要度を計算します（属性選択時のみ有効）。"
+            )
 
-        st.subheader("🔄 類義語（シノニム）統合")
-        st.session_state.synonyms_text = st.text_area(
-            "代表語, 類義語1, 類義語2... (1行に1組)",
-            value=st.session_state.synonyms_text,
-            height=120,
-            help="例: スマートフォン, スマホ, 携帯"
-        )
-        
-        st.header("🚫 除外ワード（ストップワード）")
-        st.session_state.stop_words = [
-            word.strip() for word in st.text_area(
-                "除外リスト (1行に1つ)", value="\n".join(st.session_state.stop_words),
-                height=180, on_change=set_analysis_flag_off
-            ).split('\n') if word.strip()
-        ]
+        # 2. 表記揺れ・除外ワード
+        with st.expander("表記揺れ・除外ワード", expanded=False):
+            st.session_state.synonyms_text = st.text_area(
+                "代表語, 類義語1, 類義語2... (1行に1組)",
+                value=st.session_state.synonyms_text,
+                height=120,
+                help="例: スマートフォン, スマホ, 携帯"
+            )
+            
+            st.session_state.stop_words = [
+                word.strip() for word in st.text_area(
+                    "除外リスト (1行に1つ)", value="\n".join(st.session_state.stop_words),
+                    height=180, on_change=set_analysis_flag_off
+                ).split('\n') if word.strip()
+            ]
+
+        # 3. 感情分析・表示設定
+        with st.expander("感情分析・表示設定", expanded=False):
+            st.session_state.sentiment_threshold = st.slider(
+                "感情極性判定の閾値",
+                min_value=0.0, max_value=0.5, step=0.01,
+                value=st.session_state.sentiment_threshold,
+                on_change=set_analysis_flag_off,
+                help="感情スコアがこの閾値より大きいとポジティブ、マイナスこの閾値未満だとネガティブと判定されます。"
+            )
+
+        # 4. 環境・フォント設定
+        with st.expander("環境・フォント設定", expanded=False):
+            font_options = get_system_font_options()
+            font_names = list(font_options.keys()) + ["カスタムパス入力..."]
+            
+            # 現在のパスが既定フォントのいずれかに一致するか調べる
+            current_name = "カスタムパス入力..."
+            for name, path in font_options.items():
+                if path == st.session_state.font_path:
+                    current_name = name
+                    break
+                    
+            selected_font_name = st.selectbox(
+                "日本語フォントの選択",
+                options=font_names,
+                index=font_names.index(current_name)
+            )
+            
+            if selected_font_name == "カスタムパス入力...":
+                font_input = st.text_input(
+                    "カスタムフォントパス (.ttf / .ttc)", 
+                    value=st.session_state.font_path if st.session_state.font_path not in font_options.values() else "",
+                    placeholder='例: /System/Library/Fonts/Hiragino Sans GB.ttc',
+                    help="使用したい日本語フォントの絶対パスを入力してください。"
+                )
+                if font_input:
+                    if ".." in font_input or not (font_input.lower().endswith('.ttf') or font_input.lower().endswith('.ttc')):
+                        st.error("❌ セキュリティ警告: パストラバーサル（..）や、.ttf / .ttc 以外の拡張子は指定できません。")
+                        font_input = ""
+                    st.session_state.font_path = font_input
+            else:
+                st.session_state.font_path = font_options[selected_font_name]
 
     # --- メインコンテンツ：1. データのインポート ---
     st.header("1. データのインポート")
@@ -300,7 +414,9 @@ def main():
                     synonyms_dict,
                     st.session_state.import_type,
                     attr_col_to_use,
-                    top_k=st.session_state.top_n
+                    top_k=st.session_state.top_n,
+                    document_resolution=st.session_state.document_resolution,
+                    sentiment_threshold=st.session_state.sentiment_threshold
                 )
                 progress_bar.empty()
                 
@@ -322,7 +438,9 @@ def main():
                     "font_path": st.session_state.font_path,
                     "stop_words": st.session_state.stop_words,
                     "selected_pos": st.session_state.selected_pos,
-                    "synonyms_text": st.session_state.synonyms_text
+                    "synonyms_text": st.session_state.synonyms_text,
+                    "document_resolution": st.session_state.document_resolution,
+                    "sentiment_threshold": st.session_state.sentiment_threshold
                 })
                 st.toast("すべての解析が成功しました。結果を表示します。")
                 st.rerun()
@@ -339,8 +457,30 @@ def main():
     # --- 3. 解析結果の表示 ---
     if st.session_state.analysis_complete:
         st.markdown("---")
-        st.success("📊 解析結果")
+        col_res_title, col_res_btn = st.columns([0.7, 0.3])
+        with col_res_title:
+            st.success("📊 解析結果")
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        with col_res_btn:
+            try:
+                excel_data = export_analysis_to_excel(
+                    st.session_state.df_freq,
+                    st.session_state.df_tfidf,
+                    st.session_state.df_ngrams,
+                    st.session_state.df_edges,
+                    st.session_state.df_sentences,
+                    st.session_state.corpus_stats
+                )
+                st.download_button(
+                    label="📥 全分析結果をExcelで保存 (.xlsx)",
+                    data=excel_data,
+                    file_name=f"text_mining_report_{timestamp}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"Excel出力エラー: {e}")
         
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
             "📊 統計 & 単語頻度", 
@@ -495,7 +635,8 @@ def main():
                     values=sent_counts.values,
                     color=sent_counts.index,
                     color_discrete_map={'ポジティブ': '#2ca02c', 'ネガティブ': '#d62728', 'ニュートラル': '#7f7f7f'},
-                    title='感情極性比率'
+                    title='感情極性比率',
+                    hole=0.4
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
                 
@@ -585,19 +726,29 @@ def main():
             st.subheader("🔍 原文ドリルダウン (生の声検索)")
             st.markdown("特定のキーワードが含まれる文を検索し、文脈と属性・感情スコアを確認します。")
             
-            search_word = st.text_input("検索するキーワードを入力", value="", placeholder="例: フリーズ")
-            if search_word:
-                # Filter sentences containing the search word
-                df_sentences_drill = st.session_state.df_sentences[
-                    st.session_state.df_sentences['text'].str.contains(search_word, case=False, na=False)
-                ].copy()
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                search_word = st.text_input("検索するキーワードを入力 (任意)", value="", placeholder="例: フリーズ")
+            with col_d2:
+                sent_filter = st.selectbox(
+                    "感情分類で絞り込み (任意)",
+                    options=["すべて", "ポジティブ", "ネガティブ", "ニュートラル"],
+                    index=0
+                )
                 
-                if df_sentences_drill.empty:
-                    st.info(f"「{search_word}」を含む文は見つかりませんでした。")
-                else:
-                    st.write(f"該当件数: {len(df_sentences_drill)} 件")
-                    
-                    # Highlight word using HTML
+            df_sentences_drill = st.session_state.df_sentences.copy()
+            if search_word:
+                df_sentences_drill = df_sentences_drill[df_sentences_drill['text'].str.contains(search_word, case=False, na=False)]
+            if sent_filter != "すべて":
+                df_sentences_drill = df_sentences_drill[df_sentences_drill['class'] == sent_filter]
+                
+            if df_sentences_drill.empty:
+                st.info("該当する文は見つかりませんでした。")
+            else:
+                st.write(f"該当件数: {len(df_sentences_drill)} 件")
+                
+                # Highlight word using HTML
+                if search_word:
                     import re
                     def highlight_text(txt):
                         escaped = re.escape(search_word)
@@ -607,19 +758,19 @@ def main():
                         except Exception:
                             return txt
                             
-                    df_sentences_drill['ハイライトテキスト'] = df_sentences_drill['text'].apply(highlight_text)
+                    df_sentences_drill['表示テキスト'] = df_sentences_drill['text'].apply(highlight_text)
+                else:
+                    df_sentences_drill['表示テキスト'] = df_sentences_drill['text']
                     
-                    # Select and rename columns
-                    df_show = df_sentences_drill[['ハイライトテキスト', 'attr_value', 'class', 'score']].rename(columns={
-                        'ハイライトテキスト': 'テキスト',
-                        'attr_value': '属性',
-                        'class': '感情分類',
-                        'score': '感情スコア'
-                    })
-                    
-                    st.write(df_show.to_html(escape=False, index=False), unsafe_allow_html=True)
-            else:
-                st.info("キーワードを入力すると、該当する文がここに表示されます。")
+                # Select and rename columns
+                df_show = df_sentences_drill[['表示テキスト', 'attr_value', 'class', 'score']].rename(columns={
+                    '表示テキスト': 'テキスト',
+                    'attr_value': '属性',
+                    'class': '感情分類',
+                    'score': '感情スコア'
+                })
+                
+                st.write(df_show.to_html(escape=False, index=False), unsafe_allow_html=True)
 
     elif 'initialized' in st.session_state and not st.session_state.analysis_complete:
         st.info("データを入力し、「解析実行」ボタンを押して分析を開始してください。")

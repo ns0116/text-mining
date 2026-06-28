@@ -327,3 +327,78 @@ def test_ngram_correctness_pre_filtering():
     # df_ngrams should be empty because "猫" and "可愛い" are not adjacent in raw tokens!
     assert df_ngrams.empty
 
+def test_export_analysis_to_excel():
+    from src.core.stats import export_analysis_to_excel
+    import io
+    
+    df_freq = pd.DataFrame([{'word': '猫', 'pos': 'NOUN', '出現回数': 5}])
+    df_tfidf = pd.DataFrame([{'word': '猫', '平均重要度スコア': 0.8}])
+    df_ngrams = pd.DataFrame([{'連語': '可愛い - 猫', '出現回数': 2, 'タイプ': 'Bigram'}])
+    df_edges = pd.DataFrame([{'word1': '猫', 'word2': '可愛い', 'cooc': 2, 'jaccard': 0.5}])
+    df_sentences = pd.DataFrame([{'text': '猫は可愛い', 'class': 'ポジティブ', 'score': 1.0, 'attr_value': 'A'}])
+    corpus_stats = {'総文数': 1, '総単語数 (前処理前)': 3}
+    
+    excel_bytes = export_analysis_to_excel(df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, corpus_stats)
+    
+    assert isinstance(excel_bytes, bytes)
+    assert len(excel_bytes) > 0
+    
+    # Verify we can read it back using pandas
+    excel_file = io.BytesIO(excel_bytes)
+    df_read_stats = pd.read_excel(excel_file, sheet_name='基本統計')
+    assert len(df_read_stats) == 2
+    assert df_read_stats.iloc[0]['項目'] == '総文数'
+
+def test_perform_stats_analysis_with_new_params():
+    df_raw_tokens = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '猫', 'pos': 'NOUN', 'sentiment': None, 'is_negated': False, 'word_lower': '猫'},
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '可愛い', 'pos': 'ADJ', 'sentiment': 'p', 'is_negated': False, 'word_lower': '可愛い'},
+        {'doc_id': 1, 'sentence_id': 's2', 'word': '犬', 'pos': 'NOUN', 'sentiment': None, 'is_negated': False, 'word_lower': '犬'},
+        {'doc_id': 1, 'sentence_id': 's2', 'word': '可愛い', 'pos': 'ADJ', 'sentiment': 'p', 'is_negated': False, 'word_lower': '可愛い'},
+    ])
+    df_raw_sentences = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'text': '猫可愛い', 'attr_value': 'A'},
+        {'doc_id': 1, 'sentence_id': 's2', 'text': '犬可愛い', 'attr_value': 'B'},
+    ])
+    
+    # Test document_resolution = "属性グループ単位"
+    df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = perform_stats_analysis(
+        df_raw_tokens, df_raw_sentences, ['NOUN', 'ADJ'], [], {}, 'CSV / Excel ファイル', 'attr_value',
+        document_resolution="属性グループ単位"
+    )
+    
+    assert not df_tfidf.empty
+    
+    # Test custom sentiment_threshold = 0.5 (so a sentence with score 0.1 becomes ニュートラル)
+    # Let's adjust sentiment score: s1 has '可愛い' (p), score is 1.0 (since 1 pos word, 0 neg words)
+    # If we had a sentence with score 0.2, with threshold 0.5 it would be Neutral.
+    # Let's verify that sentiment_threshold is used.
+    # We can pass sentiment_threshold=1.5 so that even 1.0 is Neutral.
+    df_freq_t, df_tfidf_t, df_ngrams_t, df_edges_t, df_sentences_t, df_tokens_t, df_ca_t, corpus_stats_t = perform_stats_analysis(
+        df_raw_tokens, df_raw_sentences, ['NOUN', 'ADJ'], [], {}, 'CSV / Excel ファイル', 'attr_value',
+        sentiment_threshold=1.5
+    )
+    assert (df_sentences_t['class'] == 'ニュートラル').all()
+
+def test_cooccurrence_duplicate_vocabulary_fix():
+    # Token list has the same word with different POS tags (e.g. '君' as PRON and NOUN)
+    df_raw_tokens = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '君', 'pos': 'NOUN', 'sentiment': None, 'is_negated': False, 'word_lower': '君'},
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '君', 'pos': 'PRON', 'sentiment': None, 'is_negated': False, 'word_lower': '君'},
+        {'doc_id': 0, 'sentence_id': 's1', 'word': '猫', 'pos': 'NOUN', 'sentiment': None, 'is_negated': False, 'word_lower': '猫'},
+    ])
+    df_raw_sentences = pd.DataFrame([
+        {'doc_id': 0, 'sentence_id': 's1', 'text': '君君猫', 'attr_value': 'A'},
+    ])
+    
+    # This should run without throwing a "Duplicate term in vocabulary" ValueError
+    df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = perform_stats_analysis(
+        df_raw_tokens, df_raw_sentences, ['NOUN', 'PRON'], [], {}, 'CSV / Excel ファイル', 'attr_value'
+    )
+    # Check that df_edges contains '君' and '猫' and not duplicates of '君'
+    assert not df_edges.empty
+    assert len(df_edges) == 1
+    assert {df_edges.iloc[0]['word1'], df_edges.iloc[0]['word2']} == {'君', '猫'}
+
+
+

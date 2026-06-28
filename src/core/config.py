@@ -38,6 +38,24 @@ POS_MAP_JAPANESE = {
 }
 POS_MAP_JAPANESE_REV = {v: k for k, v in POS_MAP_JAPANESE.items()}
 
+def get_system_font_options():
+    """システム上の日本語フォント候補を検索し、有効なパスと名称のリストを返す"""
+    standard_fonts = {
+        "Noto Sans JP (添付)": resource_path("assets/NotoSansJP-Regular.ttf"),
+        "ヒラギノ角ゴ (Mac)": "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "ヒラギノ明朝 (Mac)": "/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
+        "游ゴシック (Windows)": "C:/Windows/Fonts/YuGothM.ttc",
+        "メイリオ (Windows)": "C:/Windows/Fonts/meiryo.ttc",
+        "ＭＳ ゴシック (Windows)": "C:/Windows/Fonts/msgothic.ttc",
+        "Noto Sans CJK (Linux)": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "IPAゴシック (Linux)": "/usr/share/fonts/truetype/fonts-ipafont-gothic/ipag.ttf"
+    }
+    valid_fonts = {}
+    for name, path in standard_fonts.items():
+        if os.path.exists(path):
+            valid_fonts[name] = path
+    return valid_fonts
+
 def load_config():
     """設定ファイルを読み込む"""
     if os.path.exists(CONFIG_FILE):
@@ -69,6 +87,8 @@ def initialize_session_state():
     st.session_state.font_path = config.get("font_path", "")
     st.session_state.selected_pos = config.get("selected_pos", ['NOUN', 'PROPN', 'VERB', 'ADJ'])
     st.session_state.synonyms_text = config.get("synonyms_text", "")
+    st.session_state.document_resolution = config.get("document_resolution", "行単位（文単位）")
+    st.session_state.sentiment_threshold = config.get("sentiment_threshold", 0.05)
     
     st.session_state.raw_tokens = None
     st.session_state.raw_sentences = None
@@ -96,7 +116,9 @@ def initialize_session_state():
             "font_path": st.session_state.font_path,
             "stop_words": st.session_state.stop_words,
             "selected_pos": st.session_state.selected_pos,
-            "synonyms_text": st.session_state.synonyms_text
+            "synonyms_text": st.session_state.synonyms_text,
+            "document_resolution": st.session_state.document_resolution,
+            "sentiment_threshold": st.session_state.sentiment_threshold
         })
     
     st.session_state.initialized = True
