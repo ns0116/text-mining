@@ -22,9 +22,9 @@ src/
 
 ### 1.2. エンジニアリング上の主要機能
 * **モデルロードのキャッシュ化**
-  自然言語処理モデル（`ja_ginza`）の読み込みは実行コストが高いため、[nlp_engine.py](file://src/core/nlp_engine.py) にて `@st.cache_resource` を使用して初回のみロードするようにキャッシュ化されています。
+  自然言語処理モデル（`ja_ginza`）の読み込みは実行コストが高いため、[nlp_engine.py](../src/core/nlp_engine.py) にて `@st.cache_resource` を使用して初回のみロードするようにキャッシュ化されています。
 * **PyInstaller（exe化）時のパス解決**
-  アプリをスタンドアロンの実行ファイルとしてビルドした際、一時ディレクトリ（`_MEIPASS`）に展開されるリソース（日本語フォント `NotoSansJP-Regular.ttf` や感情極性辞書 `sentiment_dict.csv`）の参照を正しく通すため、[config.py](file://src/core/config.py) 内に `resource_path` 関数が定義されています。
+  アプリをスタンドアロンの実行ファイルとしてビルドした際、一時ディレクトリ（`_MEIPASS`）に展開されるリソース（日本語フォント `NotoSansJP-Regular.ttf` や感情極性辞書 `sentiment_dict.csv`）の参照を正しく通すため、[config.py](../src/core/config.py) 内に `resource_path` 関数が定義されています。
 
 ---
 
