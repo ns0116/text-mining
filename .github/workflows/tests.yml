@@ -2,26 +2,28 @@ name: tests
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
+      - name: Download sentiment dictionary
+        run: python scripts/download_sentiment.py || true
       - name: Run tests
         env:
           PYTHONPATH: .
-        run: |
-          pytest tests/ -v \
-            --deselect tests/test_nlp.py::test_load_sentiment_dict_success
+        run: pytest tests/ -v

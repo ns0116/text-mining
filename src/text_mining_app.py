@@ -3,6 +3,7 @@
 #       CSV/Excelインポート、属性別セグメント分析、共起ネットワーク、感情分析、N-gram、対応分析を搭載。
 # Version: v2.0 (プロフェッショナル版) - リファクタリング済
 
+import re
 import sys
 import os
 import streamlit as st
@@ -52,8 +53,8 @@ def update_text_from_upload():
         decoded = False
         for enc in encodings:
             try:
-                st.session_state.input_text = uploaded_file.read().decode(enc)
                 uploaded_file.seek(0)
+                st.session_state.input_text = uploaded_file.read().decode(enc)
                 decoded = True
                 break
             except UnicodeDecodeError:
@@ -368,7 +369,7 @@ def main():
             if st.session_state.input_text.strip():
                 # 文でスプリットしてDataFrameにする
                 raw_text = st.session_state.input_text
-                sentences = [s.strip() for s in raw_text.replace('\r\n', '\n').replace('\r', '\n').split('。') if s.strip()]
+                sentences = [s.strip() for s in re.split(r'[。！？\n]+', raw_text) if s.strip()]
                 if not sentences:
                     sentences = [raw_text.strip()] if raw_text.strip() else []
                 df_to_analyze = pd.DataFrame({"text": sentences})
@@ -749,7 +750,6 @@ def main():
                 
                 # Highlight word using HTML
                 if search_word:
-                    import re
                     def highlight_text(txt):
                         escaped = re.escape(search_word)
                         try:
