@@ -407,10 +407,12 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
     
     return df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_filtered_tokens, df_ca, corpus_stats
 
-def perform_full_analysis(df, text_col, attr_col, selected_pos, stop_words, import_type, progress_callback=None):
+def perform_full_analysis(df, text_col, attr_col, selected_pos, stop_words, import_type, progress_callback=None, synonyms_dict=None):
     """互換性維持のためのラッパー関数"""
+    if synonyms_dict is None:
+        synonyms_dict = {}
     df_raw_tokens, df_raw_sentences = run_nlp_morphology(df, text_col, attr_col, progress_callback)
-    return perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, {}, import_type, attr_col)
+    return perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, synonyms_dict, import_type, attr_col)
 
 def export_analysis_to_excel(df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, corpus_stats):
     """すべての分析結果を個別のシートにまとめたExcelファイルを生成する"""
