@@ -141,7 +141,7 @@ def generate_cooc_plotly(df_edges, df_freq, top_n_edges=40, layout_k=0.4):
     )
     return fig
 
-def generate_ca_plotly(df_ca):
+def generate_ca_plotly(df_ca, variance_explained=None):
     """対応分析結果の2次元散布図マップ"""
     if df_ca is None or df_ca.empty:
         return None
@@ -178,9 +178,16 @@ def generate_ca_plotly(df_ca):
     fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
     fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
     
+    if variance_explained and len(variance_explained) >= 2:
+        x_title = f'第一成分軸 ({variance_explained[0]:.1f}%)'
+        y_title = f'第二成分軸 ({variance_explained[1]:.1f}%)'
+    else:
+        x_title = '第一成分軸'
+        y_title = '第二成分軸'
+
     fig.update_layout(
-        xaxis_title='第一成分軸',
-        yaxis_title='第二成分軸',
+        xaxis_title=x_title,
+        yaxis_title=y_title,
         hovermode='closest',
         margin=dict(l=40, r=40, t=50, b=40),
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)

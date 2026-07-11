@@ -13,28 +13,28 @@ def perform_correspondence_analysis(df_tokens, df_sentences, attr_col, top_k=50)
     """SVDを用いて対応分析を計算する"""
     try:
         if df_tokens.empty or df_sentences.empty or not attr_col:
-            return None
-            
+            return None, [0.0, 0.0]
+
         # トークンに属性値を結合
         df_token_attr = pd.merge(df_tokens, df_sentences[['sentence_id', 'attr_value']], on='sentence_id', how='left')
-        
+
         # 頻出トップKの単語を抽出
         top_words = df_token_attr.groupby('word').size().sort_values(ascending=False).head(top_k).index.tolist()
         df_filtered = df_token_attr[df_token_attr['word'].isin(top_words)]
-        
+
         if df_filtered.empty:
-            return None
-            
+            return None, [0.0, 0.0]
+
         # クロス集計表 (単語 × 属性)
         ct = pd.crosstab(df_filtered['word'], df_filtered['attr_value'])
-        
+
         if ct.shape[0] < 2 or ct.shape[1] < 2:
-            return None
-            
+            return None, [0.0, 0.0]
+
         X = ct.values.astype(float)
         N = X.sum()
         if N == 0:
-            return None
+            return None, [0.0, 0.0]
             
         P = X / N
         
@@ -54,33 +54,37 @@ def perform_correspondence_analysis(df_tokens, df_sentences, attr_col, top_k=50)
         
         # 特異値分解
         U, s, Vt = scipy.linalg.svd(S, full_matrices=False)
-        
+
         if len(s) < 2:
-            return None
-            
+            return None, [0.0, 0.0]
+
+        # 寄与率の計算
+        total_inertia = np.sum(s**2)
+        variance_explained = (s**2 / total_inertia * 100)[:2].tolist() if total_inertia > 0 else [0.0, 0.0]
+
         # 2次元座標の算出
         R = Dr_inv_sqrt @ U[:, :2] @ np.diag(s[:2])
         C = Dc_inv_sqrt @ Vt[:2, :].T @ np.diag(s[:2])
-        
+
         df_rows = pd.DataFrame({
             'name': ct.index,
             'x': R[:, 0],
             'y': R[:, 1],
             'type': '単語'
         })
-        
+
         df_cols = pd.DataFrame({
             'name': ct.columns,
             'x': C[:, 0],
             'y': C[:, 1],
             'type': '属性'
         })
-        
+
         df_ca = pd.concat([df_rows, df_cols], ignore_index=True)
-        return df_ca
+        return df_ca, variance_explained
     except Exception as e:
         logger.warning(f"対応分析の実行中にエラーが発生しました: {e}")
-        return None
+        return None, [0.0, 0.0]
 
 def run_nlp_morphology(df, text_col, attr_col, progress_callback=None):
     """形態素解析処理のみを行い、生トークンと生文データを抽出して返す（重い処理）"""
@@ -96,59 +100,65 @@ def run_nlp_morphology(df, text_col, attr_col, progress_callback=None):
     total_rows = len(df)
     
     if hasattr(nlp, 'pipe'):
-        # 実際のGiNZAモデル向け：バッチ文書処理
+        # 実際のGiNZAモデル向け：チャンク分割バッチ処理
         texts = df[text_col].fillna("").astype(str).tolist()
         attrs = df[attr_col].fillna("未設定").astype(str).tolist() if attr_col else ["未設定"] * total_rows
-        
-        docs = nlp.pipe(texts, batch_size=64)
-        for doc_idx, doc in enumerate(docs):
-            attr_val = attrs[doc_idx]
-            
-            # spaCyによる文境界検出
-            sents = list(doc.sents) if hasattr(doc, 'sents') else [doc]
-            for sent_idx, sent in enumerate(sents):
-                sentence_id = f"{doc_idx}_{sent_idx}"
-                sent_text = sent.text.strip() if hasattr(sent, 'text') else str(sent).strip()
-                
-                all_sentences.append({
-                    'doc_id': doc_idx,
-                    'sentence_id': sentence_id,
-                    'text': sent_text,
-                    'attr_value': attr_val
-                })
-                
-                for token in sent:
-                    is_punct = token.is_punct
-                    is_space = token.is_space
-                    lemma = token.lemma_
-                    
-                    if not is_punct and not is_space and len(lemma.strip()) > 0:
-                        pos_tag = token.pos_
-                        if pos_tag in ['CCONJ', 'SCONJ']:
-                            pos_tag = 'CONJ'
-                            
-                        sentiment = sentiment_dict.get(lemma, None)
-                        
-                        is_negated = False
-                        if hasattr(token, 'children') and token.children:
-                            for child in token.children:
-                                child_dep = child.dep_ if hasattr(child, 'dep_') else ''
-                                child_lemma = child.lemma_ if hasattr(child, 'lemma_') else str(child)
-                                if child_dep in ['aux', 'fixed', 'advcl'] and child_lemma in ['ない', 'ぬ', 'ず', 'かねる', 'せん', '無い', 'なし']:
-                                    is_negated = True
-                                    break
-                                    
-                        all_tokens.append({
-                            'doc_id': doc_idx,
-                            'sentence_id': sentence_id,
-                            'word': lemma,
-                            'pos': pos_tag,
-                            'sentiment': sentiment,
-                            'is_negated': is_negated
-                        })
-            if progress_callback and doc_idx % 20 == 0:
-                progress_percentage = int((doc_idx + 1) / total_rows * 90)
-                progress_callback(progress_percentage, f"形態素解析中... ({doc_idx + 1}/{total_rows}行完了)")
+
+        BATCH_SIZE = 100
+        for chunk_start in range(0, total_rows, BATCH_SIZE):
+            chunk_texts = texts[chunk_start:chunk_start + BATCH_SIZE]
+            chunk_attrs = attrs[chunk_start:chunk_start + BATCH_SIZE]
+            docs = nlp.pipe(chunk_texts, batch_size=32)
+            for chunk_idx, doc in enumerate(docs):
+                doc_idx = chunk_start + chunk_idx
+                attr_val = chunk_attrs[chunk_idx]
+
+                # spaCyによる文境界検出
+                sents = list(doc.sents) if hasattr(doc, 'sents') else [doc]
+                for sent_idx, sent in enumerate(sents):
+                    sentence_id = f"{doc_idx}_{sent_idx}"
+                    sent_text = sent.text.strip() if hasattr(sent, 'text') else str(sent).strip()
+
+                    all_sentences.append({
+                        'doc_id': doc_idx,
+                        'sentence_id': sentence_id,
+                        'text': sent_text,
+                        'attr_value': attr_val
+                    })
+
+                    for token in sent:
+                        is_punct = token.is_punct
+                        is_space = token.is_space
+                        lemma = token.lemma_
+
+                        if not is_punct and not is_space and len(lemma.strip()) > 0:
+                            pos_tag = token.pos_
+                            if pos_tag in ['CCONJ', 'SCONJ']:
+                                pos_tag = 'CONJ'
+
+                            sentiment = sentiment_dict.get(lemma, None)
+
+                            is_negated = False
+                            if hasattr(token, 'children') and token.children:
+                                for child in token.children:
+                                    child_dep = child.dep_ if hasattr(child, 'dep_') else ''
+                                    child_lemma = child.lemma_ if hasattr(child, 'lemma_') else str(child)
+                                    if child_dep in ['aux', 'fixed', 'advcl'] and child_lemma in ['ない', 'ぬ', 'ず', 'かねる', 'せん', '無い', 'なし']:
+                                        is_negated = True
+                                        break
+
+                            all_tokens.append({
+                                'doc_id': doc_idx,
+                                'sentence_id': sentence_id,
+                                'word': lemma,
+                                'pos': pos_tag,
+                                'sentiment': sentiment,
+                                'is_negated': is_negated
+                            })
+            if progress_callback:
+                done = min(chunk_start + BATCH_SIZE, total_rows)
+                progress_percentage = int(done / total_rows * 90)
+                progress_callback(progress_percentage, f"形態素解析中... ({done}/{total_rows}行完了)")
     else:
         # モック/テスト用：1行・1文ずつの処理（モック対象が sentence_map に含まれるようにするため）
         for row_idx, row in df.iterrows():
@@ -243,7 +253,7 @@ def calculate_corpus_stats(df_raw_tokens, df_raw_sentences):
         '平均文長 (単語数)': avg_sent_len
     }
 
-def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, synonyms_dict, import_type, attr_col, top_k=50, document_resolution="行単位（文単位）", sentiment_threshold=0.05):
+def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_words, synonyms_dict, import_type, attr_col, top_k=50, document_resolution="行単位（文単位）", sentiment_threshold=0.05, min_ngram_count=1):
     """形態素解析済みのデータに対して、品詞・除外・表記揺れのフィルタリングを適用し、各種統計結果を計算する（超高速処理）"""
     if df_raw_tokens.empty:
         raise ValueError("解析対象の単語が見つかりませんでした。テキストまたは除外設定を見直してください。")
@@ -336,10 +346,15 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
                 p3 in selected_pos and wl3 not in stop_words_lower):
                 trigrams.append(f"{w1} - {w2} - {w3}")
                 
-    df_bigrams = pd.DataFrame(Counter(bigrams).most_common(), columns=['連語', '出現回数'])
+    df_bigrams = pd.DataFrame(
+        [(k, v) for k, v in Counter(bigrams).items() if v >= min_ngram_count],
+        columns=['連語', '出現回数']
+    ).sort_values('出現回数', ascending=False)
     df_bigrams['タイプ'] = 'Bigram (2語連語)'
-    df_trigrams = pd.DataFrame(Counter(trigrams).most_common(), columns=['連語', '出現回数'])
-    df_trigrams['タイプ'] = 'Trigram (3語連語)'
+    df_trigrams = pd.DataFrame(
+        [(k, v) for k, v in Counter(trigrams).items() if v >= min_ngram_count],
+        columns=['連語', '出現回数']
+    ).sort_values('出現回数', ascending=False)
     df_ngrams = pd.concat([df_bigrams, df_trigrams], ignore_index=True)
     
     # 4. 共起関係の計算 (CountVectorizerを用いた高速ベクトル積演算)
@@ -399,11 +414,13 @@ def perform_stats_analysis(df_raw_tokens, df_raw_sentences, selected_pos, stop_w
     
     # 6. 対応分析 (SVD)
     df_ca = None
+    ca_variance_explained = [0.0, 0.0]
     if attr_col is not None:
-        df_ca = perform_correspondence_analysis(df_filtered_tokens, df_sentences, attr_col, top_k)
-        
+        df_ca, ca_variance_explained = perform_correspondence_analysis(df_filtered_tokens, df_sentences, attr_col, top_k)
+
     # コーパス統計
     corpus_stats = calculate_corpus_stats(df_raw_tokens, df_raw_sentences)
+    corpus_stats['ca_variance_explained'] = ca_variance_explained
     
     return df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_filtered_tokens, df_ca, corpus_stats
 
