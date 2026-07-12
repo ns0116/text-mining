@@ -49,27 +49,32 @@ def test_perform_correspondence_analysis_success():
         {'sentence_id': 's4', 'attr_value': 'B'},
     ])
     
-    df_ca = perform_correspondence_analysis(df_tokens, df_sentences, attr_col='attr_value', top_k=10)
-    
+    df_ca, variance_explained = perform_correspondence_analysis(df_tokens, df_sentences, attr_col='attr_value', top_k=10)
+
     assert df_ca is not None
     assert isinstance(df_ca, pd.DataFrame)
     # The columns should be name, x, y, type
     assert list(df_ca.columns) == ['name', 'x', 'y', 'type']
-    
+
     # It should have 4 rows (2 words + 2 attributes)
     assert len(df_ca) == 4
-    
+
     # Check that names are correct
     names = df_ca['name'].tolist()
     assert '猫' in names
     assert '犬' in names
     assert 'A' in names
     assert 'B' in names
-    
+
     # Check that types are correct
     types = df_ca['type'].tolist()
     assert types.count('単語') == 2
     assert types.count('属性') == 2
+
+    # Check that variance_explained is a list of 2 floats summing > 0
+    assert isinstance(variance_explained, list)
+    assert len(variance_explained) == 2
+    assert sum(variance_explained) > 0
 
 def test_perform_correspondence_analysis_insufficient_data():
     # Less than 2 distinct words
@@ -82,19 +87,22 @@ def test_perform_correspondence_analysis_insufficient_data():
         {'sentence_id': 's2', 'attr_value': 'B'},
     ])
     
-    df_ca = perform_correspondence_analysis(df_tokens, df_sentences, attr_col='attr_value')
+    df_ca, variance_explained = perform_correspondence_analysis(df_tokens, df_sentences, attr_col='attr_value')
     assert df_ca is None
+    assert variance_explained == [0.0, 0.0]
 
 def test_perform_correspondence_analysis_empty():
     df_tokens = pd.DataFrame(columns=['word', 'sentence_id'])
     df_sentences = pd.DataFrame(columns=['sentence_id', 'attr_value'])
-    df_ca = perform_correspondence_analysis(df_tokens, df_sentences, attr_col='attr_value')
+    df_ca, variance_explained = perform_correspondence_analysis(df_tokens, df_sentences, attr_col='attr_value')
     assert df_ca is None
+    assert variance_explained == [0.0, 0.0]
 
 def test_perform_correspondence_analysis_exception():
     # Pass None to trigger exception handling
-    df_ca = perform_correspondence_analysis(None, None, None)
+    df_ca, variance_explained = perform_correspondence_analysis(None, None, None)
     assert df_ca is None
+    assert variance_explained == [0.0, 0.0]
 
 
 # --- Tests for perform_full_analysis (Mocked) ---

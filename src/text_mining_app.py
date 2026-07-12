@@ -199,7 +199,8 @@ def main():
                 st.session_state.attr_col,
                 top_k=st.session_state.top_n,
                 document_resolution=st.session_state.document_resolution,
-                sentiment_threshold=st.session_state.sentiment_threshold
+                sentiment_threshold=st.session_state.sentiment_threshold,
+                min_ngram_count=st.session_state.get('ngram_min_count', 2)
             )
             df_freq, df_tfidf, df_ngrams, df_edges, df_sentences, df_tokens, df_ca, corpus_stats = results
             
@@ -261,7 +262,17 @@ def main():
                 ).split('\n') if word.strip()
             ]
 
-        # 3. 感情分析・表示設定
+        # 3. N-gram設定
+        with st.expander("N-gram（連語）設定", expanded=False):
+            st.session_state.ngram_min_count = st.slider(
+                "N-gram の最低出現回数",
+                min_value=1, max_value=10,
+                value=st.session_state.get('ngram_min_count', 2),
+                on_change=set_analysis_flag_off,
+                help="この回数未満しか出現しない連語を除外します。"
+            )
+
+        # 4. 感情分析・表示設定
         with st.expander("感情分析・表示設定", expanded=False):
             st.session_state.sentiment_threshold = st.slider(
                 "感情極性判定の閾値",
@@ -271,7 +282,7 @@ def main():
                 help="感情スコアがこの閾値より大きいとポジティブ、マイナスこの閾値未満だとネガティブと判定されます。"
             )
 
-        # 4. 環境・フォント設定
+        # 5. 環境・フォント設定
         with st.expander("環境・フォント設定", expanded=False):
             font_options = get_system_font_options()
             font_names = list(font_options.keys()) + ["カスタムパス入力..."]
@@ -417,7 +428,8 @@ def main():
                     attr_col_to_use,
                     top_k=st.session_state.top_n,
                     document_resolution=st.session_state.document_resolution,
-                    sentiment_threshold=st.session_state.sentiment_threshold
+                    sentiment_threshold=st.session_state.sentiment_threshold,
+                    min_ngram_count=st.session_state.get('ngram_min_count', 2)
                 )
                 progress_bar.empty()
                 
@@ -441,7 +453,8 @@ def main():
                     "selected_pos": st.session_state.selected_pos,
                     "synonyms_text": st.session_state.synonyms_text,
                     "document_resolution": st.session_state.document_resolution,
-                    "sentiment_threshold": st.session_state.sentiment_threshold
+                    "sentiment_threshold": st.session_state.sentiment_threshold,
+                    "ngram_min_count": st.session_state.get('ngram_min_count', 2)
                 })
                 st.toast("すべての解析が成功しました。結果を表示します。")
                 st.rerun()
@@ -702,8 +715,15 @@ def main():
                 else:
                     st.markdown("対応分析は、カテゴリ（満足度や年代など）と特徴的な単語との距離を2次元マップ上に可視化します。")
                     st.info("💡 **見方**: 属性の点（オレンジダイヤ）の近くにある単語（ブルー）は、その属性で特に出現しやすい（親和性が高い）単語であることを示します。")
-                    
-                    fig_ca = generate_ca_plotly(df_ca)
+
+                    ca_variance = st.session_state.corpus_stats.get('ca_variance_explained', [0.0, 0.0])
+                    col_v1, col_v2 = st.columns(2)
+                    col_v1.metric("第一成分軸 寄与率", f"{ca_variance[0]:.1f}%")
+                    col_v2.metric("第二成分軸 寄与率", f"{ca_variance[1]:.1f}%")
+                    if ca_variance[1] < 5.0:
+                        st.caption("⚠️ 第二成分軸の寄与率が低いため、縦方向の位置関係の解釈には注意が必要です。")
+
+                    fig_ca = generate_ca_plotly(df_ca, variance_explained=ca_variance)
                     if fig_ca:
                         st.plotly_chart(fig_ca, use_container_width=True)
                         
@@ -729,36 +749,60 @@ def main():
             
             col_d1, col_d2 = st.columns(2)
             with col_d1:
-                search_word = st.text_input("検索するキーワードを入力 (任意)", value="", placeholder="例: フリーズ")
+                search_word = st.text_input(
+                    "検索するキーワード（スペース区切りで複数指定可）",
+                    value="",
+                    placeholder="例: フリーズ 動作 または サポート 問い合わせ"
+                )
+                search_mode = st.radio("検索モード", ["AND", "OR"], horizontal=True)
             with col_d2:
                 sent_filter = st.selectbox(
                     "感情分類で絞り込み (任意)",
                     options=["すべて", "ポジティブ", "ネガティブ", "ニュートラル"],
                     index=0
                 )
-                
+
             df_sentences_drill = st.session_state.df_sentences.copy()
             if search_word:
-                df_sentences_drill = df_sentences_drill[df_sentences_drill['text'].str.contains(search_word, case=False, na=False)]
+                keywords = [k.strip() for k in search_word.split() if k.strip()]
+                if keywords:
+                    if search_mode == "AND":
+                        for kw in keywords:
+                            df_sentences_drill = df_sentences_drill[
+                                df_sentences_drill['text'].str.contains(re.escape(kw), case=False, na=False)
+                            ]
+                    else:
+                        pattern = '|'.join(re.escape(kw) for kw in keywords)
+                        df_sentences_drill = df_sentences_drill[
+                            df_sentences_drill['text'].str.contains(pattern, case=False, na=False)
+                        ]
             if sent_filter != "すべて":
                 df_sentences_drill = df_sentences_drill[df_sentences_drill['class'] == sent_filter]
-                
+
             if df_sentences_drill.empty:
                 st.info("該当する文は見つかりませんでした。")
             else:
                 st.write(f"該当件数: {len(df_sentences_drill)} 件")
-                
-                # Highlight word using HTML
+
+                # Highlight all keywords using HTML
                 if search_word:
-                    def highlight_text(txt):
-                        escaped = re.escape(search_word)
-                        try:
-                            pattern = re.compile(f"({escaped})", re.IGNORECASE)
-                            return pattern.sub(r"<mark style='background-color: #ffff00; color: black; padding: 2px;'>\1</mark>", txt)
-                        except Exception:
-                            return txt
-                            
-                    df_sentences_drill['表示テキスト'] = df_sentences_drill['text'].apply(highlight_text)
+                    keywords = [k.strip() for k in search_word.split() if k.strip()]
+                    if keywords:
+                        highlight_pattern = re.compile(
+                            '|'.join(f'({re.escape(kw)})' for kw in keywords),
+                            re.IGNORECASE
+                        )
+                        def highlight_text(txt):
+                            try:
+                                return highlight_pattern.sub(
+                                    r"<mark style='background-color: #ffff00; color: black; padding: 2px;'>\g<0></mark>",
+                                    txt
+                                )
+                            except Exception:
+                                return txt
+                        df_sentences_drill['表示テキスト'] = df_sentences_drill['text'].apply(highlight_text)
+                    else:
+                        df_sentences_drill['表示テキスト'] = df_sentences_drill['text']
                 else:
                     df_sentences_drill['表示テキスト'] = df_sentences_drill['text']
                     
