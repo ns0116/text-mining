@@ -16,3 +16,6 @@ _attic/
 # macOS system files
 .DS_Store
 assets/sentiment_dict.csv
+
+# Claude Code
+CLAUDE.md
