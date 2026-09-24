@@ -15,6 +15,14 @@ scripts\text_mining_app_launch.bat
 # 中身: .venv を有効化 → streamlit run src\text_mining_app.py
 ```
 
+## テスト
+
+```bash
+PYTHONPATH=. pytest tests/ -v
+```
+
+CI（`.github/workflows/tests.yml`）準拠のコマンド。プロジェクトルートに `conftest.py`/`pytest.ini`/`pyproject.toml` が無いため、`PYTHONPATH=.` を付けずに素の `pytest` を実行すると `src.core...` 系のimportが失敗することがある。
+
 ## 注意点
 
 - `_attic/` は過去バージョンのアーカイブ。新機能はここに書かず `src/` 側で作業する
