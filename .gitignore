@@ -17,5 +17,5 @@ _attic/
 .DS_Store
 assets/sentiment_dict.csv
 
-# Claude Code
-CLAUDE.md
+# Claude Code (CLAUDE.md is public-safe; local-only overrides go in CLAUDE.local.md if ever needed)
+CLAUDE.local.md
