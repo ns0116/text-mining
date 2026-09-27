@@ -43,6 +43,10 @@ pytest は `requirements.txt` に含まれているため、`pip install -r requ
 - `requirements.txt` — アプリ実行・テスト用のみ
 - `requirements-build.txt` — Windows exe ビルド専用（`pyinstaller`・`pefile`・`pywin32-ctypes` 等）。`-r requirements.txt` を含むので、ビルド環境はこちらだけ入れればよい
 - `scripts/create_requirements.bat` — `.venv` の `pip freeze` からビルド専用パッケージを除外して `requirements.txt` を再生成する。ビルド専用パッケージを増やす場合は、このバッチの `findstr` フィルタと `requirements-build.txt` の両方を更新する。なお `( ... ) > requirements.txt` ブロック内の `echo` 行に**丸括弧を書くとブロックが早期終了してリダイレクトが壊れる**（無言で標準出力に漏れるだけなので気づきにくい）
+- **`requirements.txt` のピンは CI の Python（3.11 / 3.12）で解決できる必要がある**。ローカルの `.venv` は 3.13 なので、freeze 由来のピンがそのまま CI で入るとは限らない（実際 `networkx==3.7` は `Requires-Python >=3.12` で 3.11 のジョブを落とした）。再生成後は最低でも以下で 3.11 を通すこと:
+  ```bash
+  pip install --dry-run --ignore-installed --python-version 3.11 --only-binary=:all: --target <任意の空ディレクトリ> -r requirements.txt
+  ```
 
 ## 注意点
 

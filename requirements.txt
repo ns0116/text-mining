@@ -41,7 +41,7 @@ matplotlib==3.10.3
 mdurl==0.1.2
 murmurhash==1.0.13
 narwhals==1.43.1
-networkx==3.7
+networkx==3.6.1
 numpy==2.3.1
 openpyxl==3.1.5
 orjson==3.10.18

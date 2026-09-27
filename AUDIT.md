@@ -32,7 +32,7 @@
 | # | 項目 | 状態 | 内容 |
 |---|---|---|---|
 | A | CIの辞書依存テストがフレーキー | ✅ 2026-09-27 | 案2（失敗を検知させる）を採用。`.github/workflows/tests.yml`から`\|\| true`を外した。ただし`download_sentiment.py`は従来**例外を握り潰してexit 0で終わっていた**ため、`\|\| true`を外すだけでは検知できない。同スクリプトを修正し、ダウンロード失敗・空辞書・書き込み失敗のいずれかで`sys.exit(1)`するようにした（成功時exit 0／失敗時exit 1を実測確認）。あわせてCIの`pip install pytest`を削除（`requirements.txt`にピン留めしたpytestを非ピン指定で上書きしてしまい再現性を損なうため） |
-| B | `networkx`/`openpyxl`が未ピン留め | ✅ 2026-09-27 | `scripts/create_requirements.bat`を実行して`requirements.txt`を再生成。`networkx==3.7`/`openpyxl==3.1.5`に確定し、`>=`指定は0件になった。副作用として`et_xmlfile`/`pytest`/`pluggy`/`iniconfig`が追加される（pytestはテスト実行に必要なため同梱。README・CLAUDE.mdの「pytestは別途インストール」記述を更新） |
+| B | `networkx`/`openpyxl`が未ピン留め | ✅ 2026-09-27 | `scripts/create_requirements.bat`を実行して`requirements.txt`を再生成し、`>=`指定を0件にした。当初`networkx==3.7`でピンしたがCI(Python 3.11)を落としたため`networkx==3.6.1`に修正（発見事項5）。最終的な新規ピンは`networkx==3.6.1`/`openpyxl==3.1.5`。副作用として`et_xmlfile`/`pytest`/`pluggy`/`iniconfig`が追加される（pytestはテスト実行に必要なため同梱。README・CLAUDE.mdの「pytestは別途インストール」記述を更新） |
 
 ## プロンプト監査結果
 
@@ -99,3 +99,5 @@
    - CI(`.github/workflows/tests.yml`)は`python scripts/download_sentiment.py || true`を実行してからテストするため、**辞書の取得に失敗した場合はこのテストが落ちる**（`|| true`でダウンロード失敗を握り潰しているのに、テスト側は辞書の存在を前提にしている）。CIを安定させるなら、このテストを`skipif`で辞書の有無に応じてスキップさせるか、`|| true`を外して失敗を検知させるかの判断が必要。→ **残課題Aとして起票**。
 3. **READMEのテストまわりの記載が古かった**（今回修正） — `tests/`配下には実際には`test_config.py`/`test_nlp.py`/`test_stats.py`/`test_visualizer.py`の4ファイル（計42テスト）があるが、READMEのディレクトリ構成は`test_nlp.py`と`test_stats.py`の2つしか挙げていなかった。また実行コマンドも`pytest`とだけ書かれていたが、これは`No module named 'src'`で失敗する（実測確認済み）。`PYTHONPATH=. pytest tests/ -v`に修正した。
 4. **`create_requirements.bat`のリダイレクトが無言で効かない罠**（今回の実装時に踏んで修正） — `( ... ) > requirements.txt`ブロック内の`echo`行に丸括弧を含めると、cmdがその`)`でブロックを早期終了させ、以降の行が通常コマンドとして実行されて**出力が標準出力に漏れ、`requirements.txt`が一切更新されない**。エラーも出ないため、「created successfully」の表示だけを見ていると成功したように見える。echo文から括弧を外して解消し、同じ罠を避けるためのREMコメントをバッチ内に追加した。残課題Bの検証（batの代理実行）で発覚した。
+5. **ローカルvenvのfreezeで`requirements.txt`を再生成するとCIが壊れる**（残課題Bの対応中に発生→修正済み） — ローカルの`.venv`は**Python 3.13**だが、CIのマトリクスは**3.11 / 3.12**。`create_requirements.bat`が出力した`networkx==3.7`は`Requires-Python >=3.12`だったため、**push後のCI（run 36325042734）が3.11ジョブの「Install dependencies」で失敗した**（`ERROR: Could not find a version that satisfies the requirement networkx==3.7`）。`networkx==3.6.1`（`>=3.11`）に変更し、ローカルvenvも同版に揃えて再発を防いだ。同種の事故を防ぐため、`pip install --dry-run --python-version 3.11 ...`による事前検証手順をCLAUDE.mdに追記した。
+   - 教訓: **freezeを正とする運用は、開発機のPythonがCIのPythonより新しいと壊れる**。依存を追加・再生成したら、CIマトリクスの最小バージョンで解決できるかを必ず確認する。
