@@ -1,0 +1,13 @@
+# Windows exe ビルド専用の依存（PyInstaller 一式）
+#   使い方: pip install -r requirements-build.txt
+#
+# アプリの実行・テストだけが目的の環境では requirements.txt のみで足りる。
+# ここにあるパッケージは PyInstaller 本体とその依存（Windows 向け）で、
+# アプリのソースコードからは一切 import されていない。
+-r requirements.txt
+
+altgraph==0.17.4
+pefile==2023.2.7
+pyinstaller==6.14.1
+pyinstaller-hooks-contrib==2025.5
+pywin32-ctypes==0.2.3

@@ -12,7 +12,8 @@
 text-mining/
 │  .gitignore                   # Git除外設定
 │  README.md                    # 本説明書
-│  requirements.txt             # 依存ライブラリ一覧
+│  requirements.txt             # 依存ライブラリ一覧（アプリ実行・テスト用）
+│  requirements-build.txt       # 依存ライブラリ一覧（Windows exeビルド専用）
 │  TextMiningApp.spec           # PyInstallerビルド構成ファイル
 │  text_mining_config.json      # アプリ設定ファイル (Git除外)
 │
@@ -40,8 +41,10 @@ text-mining/
 │      download_sentiment.py    # 感情極性辞書ダウンロードスクリプト
 │
 ├─tests/                        # テストコードフォルダ
+│      test_config.py           # 設定・パス解決処理のテスト
 │      test_nlp.py              # 自然言語処理エンジンのテスト
 │      test_stats.py            # 統計分析処理のテスト
+│      test_visualizer.py       # 可視化処理のテスト
 │
 ├─.venv/                        # Python仮想環境 (Git除外)
 └─dist/                         # ビルドされた成果物出力先 (Git除外)
@@ -58,6 +61,8 @@ text-mining/
 pip install -r requirements.txt
 ```
 
+> exe（実行ファイル）のビルドも行う場合は、ビルド専用の依存関係が別ファイルに分かれています。詳細は後述の「📦 実行ファイル (exe / バイナリ) のビルド方法」を参照してください。
+
 ### 2. 自然言語処理モデル (GiNZA) のダウンロード
 日本語の形態素解析モデル（GiNZA）をインストールします。
 
@@ -72,6 +77,10 @@ python -m spacy download ja_ginza
 ```bash
 python scripts/download_sentiment.py
 ```
+
+> **辞書のダウンロードに失敗した場合でも、アプリは起動します。**
+> 辞書ファイル（`assets/sentiment_dict.csv`）が存在しない状態では、感情分析は「全件ニュートラル（感情スコア 0.0）」として表示されます。他の分析機能（頻出語・TF-IDF・N-gram・共起ネットワーク・対応分析）は通常どおり利用できます。
+> なお、ダウンロード元は外部サイト（東北大学 乾・関根研究室）のため、ネットワーク環境によっては取得できないことがあります。
 
 ### 4. アプリの起動
 
@@ -105,14 +114,25 @@ pip install pytest
 プロジェクトルートディレクトリで以下を実行します。
 
 ```bash
-pytest
+PYTHONPATH=. pytest tests/ -v
 ```
+
+`PYTHONPATH=.` を付けずに素の `pytest` を実行すると、`No module named 'src'` で失敗します（プロジェクトルートに `conftest.py`/`pytest.ini`/`pyproject.toml` が無いため）。
 
 ---
 
 ## 📦 実行ファイル (exe / バイナリ) のビルド方法
 
 本アプリは、Python環境が入っていないPCでも動作するスタンドアロンな実行ファイルにビルドできます。
+
+### ビルド用の依存ライブラリのインストール
+PyInstaller などのビルド専用パッケージは `requirements.txt` には含まれていません（アプリの実行・テストには不要なため）。ビルドの前に、以下でビルド用の依存関係をインストールしてください。
+
+```bash
+pip install -r requirements-build.txt
+```
+
+`scripts/build.bat`（Windows）は、このインストールを内部で自動実行します。
 
 ### Windows の場合:
 `scripts/` フォルダ内の以下のバッチファイルをダブルクリックして実行します。
@@ -122,6 +142,7 @@ pytest
 ターミナル（仮想環境を有効にした状態）で、プロジェクトルートフォルダから以下を実行します。
 
 ```bash
+pip install -r requirements-build.txt
 pyinstaller TextMiningApp.spec --clean
 ```
 

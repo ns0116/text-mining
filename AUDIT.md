@@ -1,29 +1,29 @@
 # AUDIT.md — text-mining
 
 作成日: 2026-09-24
-更新日: 2026-09-25（完了状況を整理）
+更新日: 2026-09-27（低2件も対応し、全項目完了）
 
-## 完了状況（最終確認: 2026-09-25）
+## 完了状況（最終確認: 2026-09-27）
 
 > 状態はこの表が正。下の監査本文は 2026-09-24 監査時点の記録（原文のまま）。
 
-**総合: 🟡 高は完了 / 残り 5件（中3・低2）**
+**総合: 🟢 全7件完了**
 
 | 優先度 | 完了 | 残り |
 |---|---|---|
 | 高 | 2/2 | 0 |
-| 中 | 0/3 | 3 |
-| 低 | 0/2 | 2 |
+| 中 | 3/3 | 0 |
+| 低 | 2/2 | 0 |
 
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|---|---|---|---|
 | 1 | 高 | CLAUDE.mdの.gitignore除外を見直す | ✅ 2026-09-24 | `5de4fb0`。機密情報・ローカル絶対パス・NAS/IP等なしを確認のうえ追跡対象化。代わりに`CLAUDE.local.md`を除外 |
 | 2 | 高 | CLAUDE.mdにテスト実行手順を追記 | ✅ 2026-09-24 | `7f77934`。`PYTHONPATH=. pytest tests/ -v`（CI準拠） |
-| 3 | 中 | 感情辞書DL失敗時の挙動をCLAUDE.md/READMEに明記 | ⬜ 未対応 | README/CLAUDE.mdとも失敗時フォールバックの記載なし（2026-09-25確認） |
-| 4 | 中 | requirements.txtからビルド専用パッケージを分離 | ⬜ 未対応 | `pyinstaller`/`pefile`/`pywin32-ctypes`等が依然混在 |
-| 5 | 中 | CLAUDE.mdに`src/core/`のモジュール構成を追記 | ⬜ 未対応 | |
-| 6 | 低 | 感情辞書DL URLのHTTPS化可否を確認 | ⬜ 未対応 | `download_sentiment.py`は`http://`のまま。提供元のHTTPS対応確認が必要 |
-| 7 | 低 | exeビルドはローカル/CI専用とCLAUDE.mdに注記 | ⬜ 未対応 | |
+| 3 | 中 | 感情辞書DL失敗時の挙動をCLAUDE.md/READMEに明記 | ✅ 2026-09-27 | 空辞書→感情スコア0.0・「ニュートラル」にフォールバックする挙動をCLAUDE.md注意点とREADME手順3に記載 |
+| 4 | 中 | requirements.txtからビルド専用パッケージを分離 | ✅ 2026-09-27 | `requirements-build.txt`新設。`pyinstaller`/`pyinstaller-hooks-contrib`/`pefile`/`pywin32-ctypes`/`altgraph`を移動。`create_requirements.bat`に除外フィルタ、`build.bat`にインストール手順を追加 |
+| 5 | 中 | CLAUDE.mdに`src/core/`のモジュール構成を追記 | ✅ 2026-09-27 | `## モジュール構成（src/）`を追加（config/nlp_engine/stats/visualizer/run.py） |
+| 6 | 低 | 感情辞書DL URLのHTTPS化可否を確認 | ✅ 2026-09-27 | `https://www.cl.ecei.tohoku.ac.jp/...` で両URLとも200（バイト数はHTTPと同一）を確認し、`download_sentiment.py`をhttpsに変更 |
+| 7 | 低 | exeビルドはローカル/CI専用とCLAUDE.mdに注記 | ✅ 2026-09-27 | CLAUDE.md注意点に、ビルドはローカル/CI専用・`requirements-build.txt`が必要・成果物は`dist/`/`build/`である旨を追記 |
 
 ## プロンプト監査結果
 
@@ -71,10 +71,21 @@
 - ✅ **対応済み** ~~CLAUDE.mdにテスト実行手順を追記~~: `PYTHONPATH=. pytest tests/ -v`（CI準拠）をCLAUDE.mdに追記した（2026-09-24）。
 
 ### 中
-- **感情辞書ダウンロード失敗時の挙動を明記**: ネットワーク制限があるクラウドサンドボックスでも`scripts/download_sentiment.py`が失敗した場合にアプリ本体は起動できること（`nlp_engine.py:24`の`os.path.exists`チェックで空辞書にグレースフルフォールバックする）をCLAUDE.md/READMEに記載する。
-- **requirements.txtのビルド専用パッケージ分離**: `pyinstaller`, `pywin32-ctypes`, `pefile`等をWindows exeビルド専用の`requirements-build.txt`のような別ファイルに切り出し、アプリ実行のみが目的の環境（クラウドセッション含む）のセットアップを軽量化する。
-- **CLAUDE.mdにsrc/core/配下のモジュール構成を追記**: `config.py`/`nlp_engine.py`/`stats.py`/`visualizer.py`の役割を一行ずつ要約し、「本体はtext_mining_app.pyのみ」という誤解を防ぐ。
+- ✅ **対応済み** ~~感情辞書ダウンロード失敗時の挙動を明記~~: 辞書なしでもアプリは起動し、`load_sentiment_dict()`が空dictを返す→感情スコア`0.0`・分類「ニュートラル」にフォールバックすることをCLAUDE.mdとREADMEに記載した（2026-09-27）。
+- ✅ **対応済み** ~~requirements.txtのビルド専用パッケージ分離~~: `requirements-build.txt`（`-r requirements.txt` + `pyinstaller`/`pyinstaller-hooks-contrib`/`pefile`/`pywin32-ctypes`/`altgraph`）を新設し、`requirements.txt`からは除去した。`scripts/build.bat`はビルド前に`requirements-build.txt`をインストールし、`scripts/create_requirements.bat`は`findstr`でビルド専用パッケージを除外して再生成する（2026-09-27）。
+- ✅ **対応済み** ~~CLAUDE.mdにsrc/core/配下のモジュール構成を追記~~: `## モジュール構成（src/）`を追加し、`config.py`/`nlp_engine.py`/`stats.py`/`visualizer.py`（と`run.py`）の役割を表で明記した（2026-09-27）。
 
 ### 低
-- 感情辞書のダウンロードURLをHTTPS化できないか確認する（提供元サイト側の対応次第）。
-- `TextMiningApp.spec`/`scripts/build.bat`によるexeビルドは「ローカル/CI専用作業であり、クラウドセッションでは通常触らない」旨をCLAUDE.mdに一言添える。
+- ✅ **対応済み** ~~感情辞書のダウンロードURLをHTTPS化できないか確認する~~: 提供元サイトはHTTPSに対応していた（名詞編・用言編とも200、取得バイト数はHTTPと同一）。`scripts/download_sentiment.py`のURLを`https://`に変更し、実際に18,528語の辞書を取得できることを確認した（2026-09-27）。
+- ✅ **対応済み** ~~`TextMiningApp.spec`/`scripts/build.bat`によるexeビルドは「ローカル/CI専用作業であり、クラウドセッションでは通常触らない」旨をCLAUDE.mdに一言添える~~: CLAUDE.mdの注意点に、ビルドはローカル/CI専用・`pip install -r requirements-build.txt`が必要・成果物は`dist/`と`build/`（gitignore対象）である旨を追記した（2026-09-27）。
+
+## 対応時に発見した追加事項（2026-09-27）
+
+監査項目の対応中に見つかった、上記7件には含まれない問題。
+
+1. **`.venv`に`networkx`と`openpyxl`が未インストールだった** — 両者は`requirements.txt`に記載があるのに実際には入っておらず、`src/core/visualizer.py:5`が`import networkx`をモジュールレベルで行うため、**アプリが起動時に`ModuleNotFoundError`で落ちる状態だった**。`pip install -r requirements.txt`で復旧済み（他は全て充足していたため追加インストールは6パッケージのみ）。
+   - 原因の推測: `requirements.txt`末尾の`networkx>=3.0`と`openpyxl>=3.0`だけが`==`ではなく`>=`で、`pip freeze`由来ではなく**手書きで追記された痕跡**がある。追記時にインストールが漏れた可能性が高い。
+   - 再発防止: 依存を追加する際は`pip install`と`requirements.txt`の更新をセットで行う。`scripts/create_requirements.bat`を使えば`.venv`の実態から再生成されるため、この種のズレは起きない。
+2. **`tests/test_nlp.py::test_load_sentiment_dict_success`は辞書ファイルに依存する** — `assets/sentiment_dict.csv`はgitignore対象のため、未ダウンロードの環境では必ず失敗する。実際、対応前は`1 failed, 41 passed`だった。辞書をダウンロード後は`42 passed`で全面グリーン。
+   - CI(`.github/workflows/tests.yml`)は`python scripts/download_sentiment.py || true`を実行してからテストするため、**辞書の取得に失敗した場合はこのテストが落ちる**（`|| true`でダウンロード失敗を握り潰しているのに、テスト側は辞書の存在を前提にしている）。CIを安定させるなら、このテストを`skipif`で辞書の有無に応じてスキップさせるか、`|| true`を外して失敗を検知させるかの判断が必要。
+3. **READMEのテストまわりの記載が古かった**（今回修正） — `tests/`配下には実際には`test_config.py`/`test_nlp.py`/`test_stats.py`/`test_visualizer.py`の4ファイル（計42テスト）があるが、READMEのディレクトリ構成は`test_nlp.py`と`test_stats.py`の2つしか挙げていなかった。また実行コマンドも`pytest`とだけ書かれていたが、これは`No module named 'src'`で失敗する（実測確認済み）。`PYTHONPATH=. pytest tests/ -v`に修正した。

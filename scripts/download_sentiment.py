@@ -13,8 +13,8 @@ def main():
     
     output_path = os.path.join(assets_dir, "sentiment_dict.csv")
     
-    noun_url = "http://www.cl.ecei.tohoku.ac.jp/resources/sent_lex/pn.csv.m3.120408.trim"
-    verb_url = "http://www.cl.ecei.tohoku.ac.jp/resources/sent_lex/wago.121808.pn"
+    noun_url = "https://www.cl.ecei.tohoku.ac.jp/resources/sent_lex/pn.csv.m3.120408.trim"
+    verb_url = "https://www.cl.ecei.tohoku.ac.jp/resources/sent_lex/wago.121808.pn"
     
     sentiment_dict = {}
 
