@@ -36,13 +36,13 @@ PYTHONPATH=. pytest tests/ -v
 
 CI（`.github/workflows/tests.yml`）準拠のコマンド。プロジェクトルートに `conftest.py`/`pytest.ini`/`pyproject.toml` が無いため、`PYTHONPATH=.` を付けずに素の `pytest` を実行すると `src.core...` 系のimportが失敗することがある。
 
-ローカルの `.venv` に pytest は入っていない（CI は別途 `pip install pytest` している）。実行前に `pip install pytest` が必要。
+pytest は `requirements.txt` に含まれているため、`pip install -r requirements.txt` で入る。
 
 ## 依存関係
 
 - `requirements.txt` — アプリ実行・テスト用のみ
 - `requirements-build.txt` — Windows exe ビルド専用（`pyinstaller`・`pefile`・`pywin32-ctypes` 等）。`-r requirements.txt` を含むので、ビルド環境はこちらだけ入れればよい
-- `scripts/create_requirements.bat` — `.venv` の `pip freeze` からビルド専用パッケージを除外して `requirements.txt` を再生成する。ビルド専用パッケージを増やす場合は、このバッチの `findstr` フィルタと `requirements-build.txt` の両方を更新する
+- `scripts/create_requirements.bat` — `.venv` の `pip freeze` からビルド専用パッケージを除外して `requirements.txt` を再生成する。ビルド専用パッケージを増やす場合は、このバッチの `findstr` フィルタと `requirements-build.txt` の両方を更新する。なお `( ... ) > requirements.txt` ブロック内の `echo` 行に**丸括弧を書くとブロックが早期終了してリダイレクトが壊れる**（無言で標準出力に漏れるだけなので気づきにくい）
 
 ## 注意点
 

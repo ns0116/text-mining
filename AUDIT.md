@@ -1,13 +1,13 @@
 # AUDIT.md — text-mining
 
 作成日: 2026-09-24
-更新日: 2026-09-27（監査7件すべて対応・残課題2件を記録）
+更新日: 2026-09-27（監査7件・残課題2件すべて対応）
 
 ## 完了状況（最終確認: 2026-09-27）
 
 > 状態はこの表が正。下の「監査本文」「ローカル依存リスト」は 2026-09-24 監査時点の記録（原文のまま）で、**対応済みの項目については現状と食い違う箇所がある**（例: ローカル依存リスト3の`http://`、同5のビルド専用パッケージ混在、同6のビルド手順未文書化はいずれも解決済み）。現状は上の表と下の「残課題」を参照。
 
-**総合: 🟢 監査7件は全完了 / 残課題2件（下記）**
+**総合: 🟢 監査7件・残課題2件すべて完了**
 
 | 優先度 | 完了 | 残り |
 |---|---|---|
@@ -25,14 +25,14 @@
 | 6 | 低 | 感情辞書DL URLのHTTPS化可否を確認 | ✅ 2026-09-27 | `ec4605b`。`https://www.cl.ecei.tohoku.ac.jp/...` で両URLとも200（バイト数はHTTPと同一）を確認し、`download_sentiment.py`をhttpsに変更 |
 | 7 | 低 | exeビルドはローカル/CI専用とCLAUDE.mdに注記 | ✅ 2026-09-27 | `ec4605b`。CLAUDE.md注意点に、ビルドはローカル/CI専用・`requirements-build.txt`が必要・成果物は`dist/`/`build/`である旨を追記 |
 
-## 残課題（2026-09-27時点・未対応）
+## 残課題（2026-09-27 対応済み）
 
-監査7件は完了。以下は対応中に見つかった未解決項目で、いずれも**方針判断またはローカル環境の操作**が必要なため未着手。
+監査7件の対応中に見つかった未解決項目。同日中に方針を決定して対応した。
 
 | # | 項目 | 状態 | 内容 |
 |---|---|---|---|
-| A | CIの辞書依存テストがフレーキー | 方針判断待ち | `tests/test_nlp.py::test_load_sentiment_dict_success`は`assets/sentiment_dict.csv`の存在を前提とするが、CI(`.github/workflows/tests.yml`)は`python scripts/download_sentiment.py \|\| true`で取得失敗を握り潰すため、**辞書取得に失敗したrunではテストが落ちる**。`skipif`で辞書の有無に応じてスキップさせるか、`\|\| true`を外して取得失敗そのものを検知させるかを決める必要がある |
-| B | `networkx`/`openpyxl`が未ピン留め | 判断待ち（要bat実行） | `requirements.txt`末尾の`networkx>=3.0`/`openpyxl>=3.0`だけが`==`ではなく`>=`（他は全て`==`）。手書き追記の痕跡で、実際に`.venv`へ未インストールだった原因でもある（発見事項1）。`scripts/create_requirements.bat`を実行すれば`.venv`の実態から再生成されて解消するが、ローカル環境でbatを走らせる操作のため保留 |
+| A | CIの辞書依存テストがフレーキー | ✅ 2026-09-27 | 案2（失敗を検知させる）を採用。`.github/workflows/tests.yml`から`\|\| true`を外した。ただし`download_sentiment.py`は従来**例外を握り潰してexit 0で終わっていた**ため、`\|\| true`を外すだけでは検知できない。同スクリプトを修正し、ダウンロード失敗・空辞書・書き込み失敗のいずれかで`sys.exit(1)`するようにした（成功時exit 0／失敗時exit 1を実測確認）。あわせてCIの`pip install pytest`を削除（`requirements.txt`にピン留めしたpytestを非ピン指定で上書きしてしまい再現性を損なうため） |
+| B | `networkx`/`openpyxl`が未ピン留め | ✅ 2026-09-27 | `scripts/create_requirements.bat`を実行して`requirements.txt`を再生成。`networkx==3.7`/`openpyxl==3.1.5`に確定し、`>=`指定は0件になった。副作用として`et_xmlfile`/`pytest`/`pluggy`/`iniconfig`が追加される（pytestはテスト実行に必要なため同梱。README・CLAUDE.mdの「pytestは別途インストール」記述を更新） |
 
 ## プロンプト監査結果
 
@@ -98,3 +98,4 @@
 2. **`tests/test_nlp.py::test_load_sentiment_dict_success`は辞書ファイルに依存する** — `assets/sentiment_dict.csv`はgitignore対象のため、未ダウンロードの環境では必ず失敗する。実際、対応前は`1 failed, 41 passed`だった。辞書をダウンロード後は`42 passed`で全面グリーン。
    - CI(`.github/workflows/tests.yml`)は`python scripts/download_sentiment.py || true`を実行してからテストするため、**辞書の取得に失敗した場合はこのテストが落ちる**（`|| true`でダウンロード失敗を握り潰しているのに、テスト側は辞書の存在を前提にしている）。CIを安定させるなら、このテストを`skipif`で辞書の有無に応じてスキップさせるか、`|| true`を外して失敗を検知させるかの判断が必要。→ **残課題Aとして起票**。
 3. **READMEのテストまわりの記載が古かった**（今回修正） — `tests/`配下には実際には`test_config.py`/`test_nlp.py`/`test_stats.py`/`test_visualizer.py`の4ファイル（計42テスト）があるが、READMEのディレクトリ構成は`test_nlp.py`と`test_stats.py`の2つしか挙げていなかった。また実行コマンドも`pytest`とだけ書かれていたが、これは`No module named 'src'`で失敗する（実測確認済み）。`PYTHONPATH=. pytest tests/ -v`に修正した。
+4. **`create_requirements.bat`のリダイレクトが無言で効かない罠**（今回の実装時に踏んで修正） — `( ... ) > requirements.txt`ブロック内の`echo`行に丸括弧を含めると、cmdがその`)`でブロックを早期終了させ、以降の行が通常コマンドとして実行されて**出力が標準出力に漏れ、`requirements.txt`が一切更新されない**。エラーも出ないため、「created successfully」の表示だけを見ていると成功したように見える。echo文から括弧を外して解消し、同じ罠を避けるためのREMコメントをバッチ内に追加した。残課題Bの検証（batの代理実行）で発覚した。

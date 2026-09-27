@@ -1,4 +1,5 @@
 import os
+import sys
 import urllib.request
 import csv
 
@@ -17,6 +18,7 @@ def main():
     verb_url = "https://www.cl.ecei.tohoku.ac.jp/resources/sent_lex/wago.121808.pn"
     
     sentiment_dict = {}
+    failed = False
 
     # Helper function to download and parse with different encodings
     def fetch_url(url):
@@ -51,7 +53,8 @@ def main():
                 if polarity in ['p', 'n', 'e']:
                     sentiment_dict[word] = polarity
     else:
-        print("Warning: Noun dictionary could not be processed.")
+        print("Error: Noun dictionary could not be downloaded.")
+        failed = True
 
     # 2. Download and parse verbal/adjectival sentiment dictionary (用言編)
     verb_content = fetch_url(verb_url)
@@ -82,7 +85,8 @@ def main():
                     # We can store the exact entry
                     sentiment_dict[w] = polarity
     else:
-        print("Warning: Verb/Adjective dictionary could not be processed.")
+        print("Error: Verb/Adjective dictionary could not be downloaded.")
+        failed = True
 
     # 3. Output to CSV
     if sentiment_dict:
@@ -96,8 +100,14 @@ def main():
             print("Successfully compiled and saved the sentiment dictionary!")
         except Exception as e:
             print(f"Error writing output file: {e}")
+            failed = True
     else:
         print("Error: Sentiment dictionary is empty, nothing written.")
+        failed = True
+
+    if failed:
+        print("Failed to prepare the sentiment dictionary.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -106,6 +106,8 @@ chmod +x scripts/text_mining_app_launch.sh
 コアロジックの動作検証のために `pytest` によるユニットテストを実行できます。
 
 ### 1. pytest のインストール
+pytest は `requirements.txt` に含まれているため、「1. 依存ライブラリのインストール」が済んでいれば追加の作業は不要です。個別に導入する場合のみ以下を実行します。
+
 ```bash
 pip install pytest
 ```
