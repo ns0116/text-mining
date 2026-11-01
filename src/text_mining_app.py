@@ -279,7 +279,7 @@ def main():
                 min_value=0.0, max_value=0.5, step=0.01,
                 value=st.session_state.sentiment_threshold,
                 on_change=set_analysis_flag_off,
-                help="感情スコアがこの閾値より大きいとポジティブ、マイナスこの閾値未満だとネガティブと判定されます。"
+                help="感情スコアがこの閾値より大きいとポジティブ、この閾値にマイナスを付けた値より小さいとネガティブと判定されます。"
             )
 
         # 5. 環境・フォント設定
@@ -665,7 +665,7 @@ def main():
                         color_continuous_scale='RdYlGn',
                         color_continuous_midpoint=0,
                         title='属性（セグメント）別 平均感情スコア',
-                        labels={'score': '平均感情値 (-1: ネガ極大 ~ 1: ポジ極大)', 'attr_value': '属性カテゴリ'}
+                        labels={'score': '平均感情値 (-1: 最もネガティブ 〜 1: 最もポジティブ)', 'attr_value': '属性カテゴリ'}
                     ).update_layout(xaxis_title=None)
                     st.plotly_chart(fig_sent_bar, use_container_width=True)
                 else:
@@ -707,7 +707,7 @@ def main():
                 # カテゴリ数チェック
                 unique_attrs = df_sentences['attr_value'].dropna().unique()
                 if len(unique_attrs) == 2:
-                    st.warning("⚠️ 注意: 属性のカテゴリ数が2つの場合（例：男性と女性のみ）、対応分析は数学的に1次元の軸に縮退します。2次元マップ上の第二成分軸（Y軸）はノイズデータであるため、横方向（第一成分軸）のみに着目してください。より信頼性の高い分析には、3つ以上のカテゴリ（例：満足、普通、不満）を持つ属性を使用することをお勧めします。")
+                    st.warning("⚠️ 注意: 属性のカテゴリ数が2つの場合（例：男性と女性のみ）、対応分析は数学的に1次元の軸に縮退します。2次元マップ上の第二成分軸（Y軸）はノイズデータであるため、横方向（第一成分軸）のみに着目してください。より信頼性の高い分析には、3つ以上のカテゴリ（例：満足、普通、不満）を持つ属性を使用することをおすすめします。")
                 
                 df_ca = st.session_state.df_ca
                 if df_ca is None or df_ca.empty:
