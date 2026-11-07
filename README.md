@@ -1,5 +1,9 @@
 # テキストマイニング・アプリケーション
 
+> **保守は終了しました（2026-11-07）**: このリポジトリは更新しません。コードは参照用に残しています。
+>
+> **No longer maintained (2026-11-07)**: This repository will not be updated. The code is kept for reference.
+
 日本語テキストの形態素解析を行い、頻出単語や重要キーワード（TF-IDF）を抽出して、棒グラフやワードクラウドで可視化する Streamlit アプリケーションです。
 
 v2.0 では、属性別セグメント分析、共起ネットワーク、感情分析、N-gram、対応分析（Correspondence Analysis）などに対応し、より詳細な分析を行えます。
